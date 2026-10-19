@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_KUNPENG_HCCS)	+= kunpeng_hccs.o
+
+obj-$(CONFIG_HISI_HBMDEV)	+= hisi_hbmdev.o
+obj-$(CONFIG_HISI_HBMCACHE)	+= hisi_hbmcache.o
+obj-$(CONFIG_ARM64_PBHA)		+= pbha.o
+hisi_l3t-objs			:= hisi_lockdown.o l3t.o
+obj-$(CONFIG_HISI_L3T)		+= hisi_l3t.o
+obj-$(CONFIG_HISI_L0)		+= hisi_l0.o
+obj-$(CONFIG_HISI_MEM_RAS)	+= hisi_mem_ras.o
+
+obj-$(CONFIG_HISI_SOC_CACHE)	+= hisi_soc_cache_framework.o
+obj-$(CONFIG_HISI_SOC_HHA)	+= hisi_soc_hha.o

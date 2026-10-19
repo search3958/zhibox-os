@@ -3,7 +3,9 @@
 # (中断・部分コピー等で汚れた場合に使用。成果物 object は無傷なのでビルドは即再開できる)
 set -euo pipefail
 
-WIN_SRC="/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/kernel"
+WIN_ROOT="/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os"
+WIN_SRC="$WIN_ROOT/kernel"
+if [ -d "$WIN_SRC/.git" ]; then GD="$WIN_SRC/.git"; else GD="$WIN_ROOT/kernel.git"; fi
 SRC="$HOME/kernel-src"
 
 echo "cleaning: $SRC"
@@ -11,7 +13,7 @@ rm -rf "$SRC"
 mkdir -p "$SRC"
 
 echo "extracting from git objects (HEAD)..."
-git --git-dir="$WIN_SRC/.git" archive HEAD | tar -x -C "$SRC"
+git --git-dir="$GD" archive HEAD | tar -x -C "$SRC"
 
 echo "files=$(find "$SRC" -type f | wc -l)  size=$(du -sh "$SRC" | cut -f1)"
 

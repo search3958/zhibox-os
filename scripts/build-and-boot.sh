@@ -37,7 +37,13 @@ if [ -f "$SRC/Makefile" ]; then
 else
   say "1/6 git オブジェクトから完全なツリーを展開 (大文字小文字衝突ファイルも含む)"
   mkdir -p "$SRC"
-  git --git-dir="$WIN_SRC/.git" archive HEAD | tar -x -C "$SRC"
+  # git ディレクトリ: 旧レイアウト (kernel/.git) と新レイアウト (kernel.git/) の両方に対応
+  if [ -d "$WIN_SRC/.git" ]; then
+    GD="$WIN_SRC/.git"
+  else
+    GD="$WIN_ROOT/kernel.git"
+  fi
+  git --git-dir="$GD" archive HEAD | tar -x -C "$SRC"
 fi
 cd "$SRC"
 echo "    ツリー: $(du -sh "$SRC" 2>/dev/null | cut -f1)  /  jobs=$JOBS  /  $(gcc --version | head -1)"

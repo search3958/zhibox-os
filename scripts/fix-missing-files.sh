@@ -6,11 +6,15 @@
 #
 set -uo pipefail
 
-REPO="/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/kernel"
-cd "$REPO" || exit 1
-git config --global --add safe.directory "$REPO" 2>/dev/null
+ROOT="/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os"
+REPO="$ROOT/kernel"
+if [ -d "$REPO/.git" ]; then GD="$REPO/.git"; else GD="$ROOT/kernel.git"; fi
+g() { git --git-dir="$GD" --work-tree="$REPO" "$@"; }
 
-missing=$(git status --porcelain | grep '^ D' | cut -c4- || true)
+cd "$REPO" || exit 1
+git config --global --add safe.directory "$GD" 2>/dev/null
+
+missing=$(g status --porcelain | grep '^ D' | cut -c4- || true)
 if [ -z "$missing" ]; then
   echo "欠落ファイルはありません (既に完全)"
   exit 0
@@ -19,7 +23,7 @@ fi
 echo "欠落ファイル数: $(echo "$missing" | wc -l)"
 echo "$missing" | while IFS= read -r f; do
   [ -z "$f" ] && continue
-  if git checkout -f HEAD -- "$f" 2>/tmp/co_err.txt; then
+  if g checkout -f HEAD -- "$f" 2>/tmp/co_err.txt; then
     echo "  OK   $f"
   else
     echo "  NG   $f  : $(cat /tmp/co_err.txt)"
@@ -27,9 +31,9 @@ echo "$missing" | while IFS= read -r f; do
 done
 
 echo "--- 復元後の状態 ---"
-left=$(git status --porcelain | wc -l)
+left=$(g status --porcelain | wc -l)
 echo "残存 dirty = $left"
-git status --porcelain | head -20
+g status --porcelain | head -20
 
 echo "--- ペア検証 (26ファイルが揃っているか) ---"
 for p in \

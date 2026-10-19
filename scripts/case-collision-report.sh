@@ -8,13 +8,15 @@
 #
 set -euo pipefail
 
-REPO="${1:-/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/kernel}"
+ROOT="${ZHIBOX_ROOT:-/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os}"
+REPO="${1:-$ROOT/kernel}"
+if [ -d "$REPO/.git" ]; then GD="$REPO/.git"; else GD="$ROOT/kernel.git"; fi
 OUT=/tmp/case_pairs.txt
 DIRS=/tmp/case_dirs.txt
 
-cd "$REPO"
+cd "$REPO" || { echo "cd failed: $REPO"; exit 1; }
 
-git ls-files \
+git --git-dir="$GD" --work-tree="$REPO" ls-files \
   | awk '{ print tolower($0) "\t" $0 }' \
   | sort \
   | awk -F'\t' '

@@ -1,0 +1,17 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	ignorecase = false
+	protectNTFS = false
+	longpaths = true
+[remote "origin"]
+	url = https://gitee.com/openeuler/kernel.git
+	fetch = +refs/heads/OLK-5.10:refs/remotes/origin/OLK-5.10
+[branch "OLK-5.10"]
+	remote = origin
+	merge = refs/heads/OLK-5.10
+[remote "mirror"]
+	url = https://github.com/openeuler-mirror/kernel.git
+	fetch = +refs/heads/*:refs/remotes/mirror/*

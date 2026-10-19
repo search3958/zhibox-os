@@ -55,6 +55,8 @@ if [ ! -f .config ]; then
 else
   echo "    .config あり (削除すると再生成)"
 fi
+bash scripts/config --enable DRM_BOCHS
+make olddefconfig
 
 # ---------------------------------------------------------------- 3. ビルド
 say "3/6 make -j$JOBS bzImage"
@@ -63,42 +65,13 @@ ls -lh arch/x86/boot/bzImage
 
 # ------------------------------------------------------------- 4. initramfs
 say "4/6 最小 initramfs (busybox) を作成"
-rm -rf "$INITRAMFS"
-mkdir -p "$INITRAMFS"/{bin,sbin,proc,sys,dev,tmp,root,usr/bin,usr/sbin,usr/local/bin}
-cp /bin/busybox "$INITRAMFS/bin/busybox"
-cat > "$INITRAMFS/init" <<'EOF'
-#!/bin/busybox sh
-/bin/busybox --install -s
-mount -t proc     proc     /proc  2>/dev/null
-mount -t sysfs    sysfs    /sys   2>/dev/null
-mount -t devtmpfs devtmpfs /dev   2>/dev/null
-mount -t tmpfs    tmpfs    /tmp   2>/dev/null
-echo
-echo "=============================================="
-echo "  openEuler kernel boot test"
-echo "=============================================="
-uname -a
-echo
-echo "ZHIBOX_BOOT_OK"
-echo "=============================================="
-# 起動確認モード (cmdline に "boottest" を含む) では自動的に電源オフして QEMU を終了する
-if grep -q boottest /proc/cmdline 2>/dev/null; then
-  echo "(boot test mode -> poweroff)"
-  poweroff -f
-  sleep 5
-  halt -f
-fi
-exec /bin/sh
-EOF
-chmod 0755 "$INITRAMFS/init"
-( cd "$INITRAMFS" && find . | cpio -o -H newc --quiet | gzip -9 ) > "$INITRD"
-ls -lh "$INITRD"
+bash "$WIN_ROOT/scripts/build-initramfs.sh"
 
 # ----------------------------------------------------------- 5. QEMU ブートテスト
 say "5/6 QEMU でブート確認 (最大90秒)"
 set +e
 timeout -k 5 90 qemu-system-x86_64 \
-  -machine pc -m 512M -smp 2 -no-reboot \
+  -machine pc -vga std -m 512M -smp 2 -no-reboot \
   -kernel "$SRC/arch/x86/boot/bzImage" \
   -initrd "$INITRD" \
   -append "console=ttyS0 rdinit=/init panic=-1 loglevel=4 boottest" \

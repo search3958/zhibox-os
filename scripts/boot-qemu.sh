@@ -15,7 +15,7 @@ KERNEL="${2:-$WIN_OUT/bzImage}"
 [ -f "$INITRD" ] || { echo "initramfs がありません: $INITRD"; exit 1; }
 
 exec qemu-system-x86_64 \
-  -machine pc -m 1G -smp 2 \
+  -machine pc -vga std -m 1G -smp 2 \
   -kernel "$KERNEL" \
   -initrd "$INITRD" \
   -append "console=tty0 rdinit=/init loglevel=6" \

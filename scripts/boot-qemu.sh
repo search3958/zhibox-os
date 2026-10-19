@@ -2,7 +2,7 @@
 #
 # ビルド済みカーネルを QEMU で対話的に起動する
 #   WSL 内で:  bash boot-qemu.sh
-#   終了方法:  シェルで "poweroff -f" 、または Ctrl+A → X
+#   終了方法:  ゲストのシェルで "poweroff -f" 、またはウィンドウを閉じる
 #
 set -euo pipefail
 
@@ -18,5 +18,5 @@ exec qemu-system-x86_64 \
   -machine pc -m 1G -smp 2 \
   -kernel "$KERNEL" \
   -initrd "$INITRD" \
-  -append "console=ttyS0 rdinit=/init loglevel=6" \
-  -nographic
+  -append "console=tty0 rdinit=/init loglevel=6" \
+  -display gtk

@@ -13,7 +13,7 @@ scripts/
 │   └── common.sh          # 共通 bash (OS 判定・パス・ツール検出)
 ├── guest/                 # ゲスト (Linux) 側で動くもの
 │   ├── init               #   PID 1 (busybox sh)
-│   └── fb-gradient.c      #   framebuffer 描画デモ
+│   └── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ)
 ├── host/                  # ホスト OS に依存するもの
 │   ├── darwin/            #   macOS 専用
 │   │   ├── elf.h          #     ホストツール用ヘッダ

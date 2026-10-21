@@ -86,6 +86,10 @@ else
   echo "    .config あり (削除すると再生成)"
 fi
 bash scripts/config --enable DRM_BOCHS
+# virtio-gpu (QEMU の GPU デバイス) を有効化。VRAM への MMIO 書き込みではなく
+# GEM バッファ + DIRTYFB でホスト側に転送する (gradient が自動で使う)
+bash scripts/config --enable VIRTIO --enable VIRTIO_PCI \
+                    --enable DRM_VIRTIO_GPU
 
 if [ "$OS" = macos ]; then
   # objtool (スタック検証 / ORC unwinder) は macOS ホストではビルド不能 (libelf 等に依存)。

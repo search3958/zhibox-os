@@ -24,7 +24,7 @@ ARGS=(
   -machine pc -m 1G -smp 2
   -kernel "$KERNEL"
   -initrd "$INITRD"
-  -vga std
+  -vga virtio
 )
 
 if [ -n "${SERIAL:-}" ]; then
@@ -40,7 +40,7 @@ if [ "$OS" = macos ]; then
   echo "QEMU (GUI) 起動中 … Cocoa ウィンドウが開きます"
   echo "  終了方法: 画面のシェルで poweroff -f ／ ウィンドウを閉じる (Ctrl+C)"
   exec "$QEMU" "${ARGS[@]}" \
-    -append "console=tty0 rdinit=/init loglevel=6" \
+    -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1" \
     -display cocoa
 fi
 
@@ -54,7 +54,7 @@ echo "  終了方法: 画面のシェルで poweroff -f ／ ウィンドウを�
 
 GUI_ARGS=(
   "${ARGS[@]}"
-  -append "console=tty0 rdinit=/init loglevel=6"
+  -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1"
 )
 
 if "$QEMU" "${GUI_ARGS[@]}" -display gtk; then

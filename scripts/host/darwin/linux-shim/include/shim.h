@@ -40,6 +40,7 @@ static inline long zh_syscall6(long nr, long a1, long a2, long a3,
 #define ZH_SYS_mmap		9
 #define ZH_SYS_munmap		11
 #define ZH_SYS_ioctl		16
+#define ZH_SYS_nanosleep	35
 #define ZH_SYS_exit		60
 
 static inline long zh_syscall(long nr, long a1, long a2, long a3)
@@ -64,6 +65,22 @@ void perror(const char *s);
 int fprintf(void *stream, const char *format, ...);
 
 extern void *stderr;
+
+/* ------------------------------------------------------------ ioctl */
+#define _IOC_READ	2
+#define _IOC_WRITE	1
+
+#ifndef _IOC
+#define _IOC(dir, type, nr, size) \
+	(((dir) << 30) | ((type) << 8) | ((nr) << 0) | ((size) << 16))
+#endif
+
+#ifndef _IOWR
+#define _IOWR(type, nr, size) \
+	_IOC(_IOC_READ | _IOC_WRITE, (type), (nr), sizeof(size))
+#endif
+
+void *memset(void *s, int c, size_t n);
 
 /* ------------------------------------------------------------ fcntl */
 #define O_RDWR		02
@@ -138,5 +155,53 @@ struct fb_var_screeninfo {
 #define KDSETMODE		0x4B3A
 #define KD_TEXT			0x00
 #define KD_GRAPHICS		0x01
+
+/* ------------------------------------------------------------ fcntl */
+#define O_RDONLY	0
+#define O_NONBLOCK	04000
+
+/* ------------------------------------------------------------ mman */
+#define MAP_PRIVATE	0x02
+#define MAP_ANONYMOUS	0x20
+
+/* ------------------------------------------------------------ time */
+struct timeval {
+	long tv_sec;
+	long tv_usec;
+};
+
+struct timespec {
+	long tv_sec;
+	long tv_nsec;
+};
+
+int nanosleep(const struct timespec *request, struct timespec *remaining);
+
+/* ------------------------------------------------------------ termios */
+#define NCCS		19
+
+struct termios {
+	uint32_t c_iflag;
+	uint32_t c_oflag;
+	uint32_t c_cflag;
+	uint32_t c_lflag;
+	uint8_t c_line;
+	uint8_t c_cc[NCCS];
+};
+
+#define TCGETS		0x5401
+#define TCSETS		0x5402
+#define TCSANOW		0
+#define ICANON		0000002
+#define ECHO		0000010
+#define VMIN		6
+#define VTIME		5
+
+int tcgetattr(int fd, struct termios *termios_p);
+int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+
+/* ------------------------------------------------------------ その他 */
+extern int errno;
+int printf(const char *format, ...);
 
 #endif /* ZHIBOX_LINUX_SHIM_H */

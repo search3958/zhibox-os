@@ -91,12 +91,32 @@ wsl -d Ubuntu-22.04 -u root -e bash /mnt/c/.../zhibox-os/scripts/build-and-boot.
 bash scripts/boot-gui.sh
 ```
 
+GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起動します。
+
+- **マウス**: QEMU ウィンドウ内をクリックしてポインタをグラブ（PS/2 マウス）
+- **ウィンドウ**: タイトルバーをドラッグで移動、クリックで最前面へ
+- **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
+
+### GPU アクセラレーション (virtio-gpu)
+
+GUI 起動では QEMU の **virtio-gpu** (`-vga virtio`) を使います。
+
+- カーネルは `CONFIG_VIRTIO_PCI` / `CONFIG_DRM_VIRTIO_GPU` を有効化
+- `gradient` は `/dev/fb0`（virtio-gpu の GEM バッファ）に描画し、
+  DRM の `DIRTYFB` で**変更された矩形だけ**をホストへ転送する
+  （bochs の VRAM への MMIO 書き込みより大幅に速い）
+- `DIRTYFB` に対応していないドライバでは、自動的に従来の直接描画へフォールバック
+- 起動ログに `gradient: drm acceleration on (virtio-gpu)` と出れば加速パスが有効
+- なお Homebrew の QEMU (macOS) は virglrenderer 非対応のため、
+  OpenGL/3D のハードウェアアクセラレーションは対象外（2D の転送高速化まで）
+
 **シリアルコンソール（対話・-nographic）**:
 
 ```bash
 bash scripts/boot-qemu.sh
 ```
 
+- シリアル起動ではデモは自動起動しません（`gradient` と入力すると起動、`q` で終了）
 - どちらも `/` に着地し busybox シェルが待機（`Linux (none) 5.10.0 ...`）
 - 終了: 画面の `poweroff -f`、または `Ctrl+A` → `X`（nographic 時）
 - macOS は TCG のため起動に数分かかる（スクリプトは最大300秒待つ）

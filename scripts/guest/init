@@ -19,4 +19,9 @@ if grep -q boottest /proc/cmdline 2>/dev/null; then
   sleep 5
   halt -f
 fi
+if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
+  echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
+  /bin/gradient
+  echo "(framebuffer demo finished)"
+fi
 exec /bin/sh

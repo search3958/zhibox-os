@@ -25,6 +25,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "zh_font.h"
+#include "zh_png.h"
+
 #define TITLE_H		24
 #define BORDER		2
 #define CURSOR_W	10
@@ -69,6 +72,18 @@ static int tty_raw;
 
 static struct window windows[WINDOW_COUNT];
 static int stacking[WINDOW_COUNT] = {0, 1, 2};
+
+/* ------------------------------------------------------------ フォント / 壁紙 */
+
+#define ZH_FONT_PATH		"/usr/share/zhibox/font.ttf"
+#define ZH_WALLPAPER_PATH	"/usr/share/zhibox/wallpaper.png"
+
+static struct zh_font ui_font;
+static int font_ready;
+static uint8_t *wallpaper_rgba;
+static int wallpaper_w;
+static int wallpaper_h;
+static uint8_t text_mask[128 * 128];
 
 /* ------------------------------------------------------------ DRM 加速
  *
@@ -326,30 +341,306 @@ static void draw_text(uint8_t *buffer, int x, int y, const char *text,
 	}
 }
 
+/*
+ * TTF のカバレッジ (alpha) を使って 1 ピクセルを合成する。
+ * color は rgb() で作ったフレームバッファ形式の値。
+ */
+static void blend_pixel(uint8_t *buffer, int x, int y, uint32_t color,
+			unsigned int alpha)
+{
+	uint8_t *pixel;
+	uint32_t dst;
+	uint32_t out;
+	unsigned int rmax;
+	unsigned int gmax;
+	unsigned int bmax;
+	unsigned int dr;
+	unsigned int dg;
+	unsigned int db;
+	unsigned int sr;
+	unsigned int sg;
+	unsigned int sb;
+
+	if (!alpha || x < 0 || y < 0 || x >= screen_w || y >= screen_h)
+		return;
+
+	pixel = buffer + (size_t)y * pitch + (size_t)x * bytes_per_pixel;
+	if (bytes_per_pixel == 4) {
+		dst = *(uint32_t *)pixel;
+	} else if (bytes_per_pixel == 3) {
+		dst = (uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) |
+		      ((uint32_t)pixel[2] << 16);
+	} else {
+		dst = *(uint16_t *)pixel;
+	}
+
+	rmax = vinfo.red.length ? (1u << vinfo.red.length) - 1u : 0;
+	gmax = vinfo.green.length ? (1u << vinfo.green.length) - 1u : 0;
+	bmax = vinfo.blue.length ? (1u << vinfo.blue.length) - 1u : 0;
+	dr = (dst >> vinfo.red.offset) & rmax;
+	dg = (dst >> vinfo.green.offset) & gmax;
+	db = (dst >> vinfo.blue.offset) & bmax;
+	sr = (color >> vinfo.red.offset) & rmax;
+	sg = (color >> vinfo.green.offset) & gmax;
+	sb = (color >> vinfo.blue.offset) & bmax;
+
+	out = ((dr * (255u - alpha) + sr * alpha + 127u) / 255u)
+	      << vinfo.red.offset;
+	out |= ((dg * (255u - alpha) + sg * alpha + 127u) / 255u)
+	       << vinfo.green.offset;
+	out |= ((db * (255u - alpha) + sb * alpha + 127u) / 255u)
+	       << vinfo.blue.offset;
+
+	if (bytes_per_pixel == 4) {
+		*(uint32_t *)pixel = out;
+	} else if (bytes_per_pixel == 3) {
+		pixel[0] = (uint8_t)out;
+		pixel[1] = (uint8_t)(out >> 8);
+		pixel[2] = (uint8_t)(out >> 16);
+	} else {
+		*(uint16_t *)pixel = (uint16_t)out;
+	}
+}
+
+static uint32_t next_codepoint(const char **text)
+{
+	const unsigned char *s = (const unsigned char *)*text;
+	uint32_t code;
+	int extra;
+	int i;
+
+	if (!s[0])
+		return 0;
+	if (s[0] < 0x80) {
+		*text += 1;
+		return s[0];
+	}
+	if ((s[0] & 0xe0) == 0xc0) {
+		code = s[0] & 0x1f;
+		extra = 1;
+	} else if ((s[0] & 0xf0) == 0xe0) {
+		code = s[0] & 0x0f;
+		extra = 2;
+	} else if ((s[0] & 0xf8) == 0xf0) {
+		code = s[0] & 0x07;
+		extra = 3;
+	} else {
+		*text += 1;
+		return '?';
+	}
+
+	for (i = 1; i <= extra; i++) {
+		if ((s[i] & 0xc0) != 0x80) {
+			*text += 1;
+			return '?';
+		}
+		code = (code << 6) | (s[i] & 0x3f);
+	}
+	*text += extra + 1;
+	return code;
+}
+
+static int ui_text_width(const char *text, int px)
+{
+	const char *p = text;
+	int width = 0;
+
+	if (!font_ready)
+		return text_width(text, px >= 36 ? 4 : (px >= 16 ? 2 : 1));
+
+	while (*p) {
+		uint32_t code = next_codepoint(&p);
+		uint32_t glyph;
+
+		if (!code)
+			break;
+		glyph = zh_font_glyph_index(&ui_font, code);
+		width += zh_font_advance(&ui_font, glyph, px);
+	}
+	return width;
+}
+
+static void ui_text(uint8_t *buffer, int x, int y_top, const char *text,
+		    uint32_t color, int px)
+{
+	const char *p = text;
+	int baseline;
+	int pen = x;
+
+	if (!font_ready) {
+		draw_text(buffer, x, y_top, text, color,
+			  px >= 36 ? 4 : (px >= 16 ? 2 : 1));
+		return;
+	}
+
+	baseline = y_top + zh_font_ascent(&ui_font, px);
+	while (*p) {
+		uint32_t code = next_codepoint(&p);
+		uint32_t glyph;
+		int bw = 0;
+		int bh = 0;
+		int bx = 0;
+		int by = 0;
+		int row;
+		int column;
+
+		if (!code)
+			break;
+		glyph = zh_font_glyph_index(&ui_font, code);
+		if (zh_font_render(&ui_font, glyph, px, text_mask,
+				   sizeof(text_mask), &bw, &bh, &bx, &by) == 1) {
+			for (row = 0; row < bh; row++) {
+				for (column = 0; column < bw; column++) {
+					unsigned int alpha =
+						text_mask[(size_t)row * bw + column];
+
+					if (alpha)
+						blend_pixel(buffer,
+							    pen + bx + column,
+							    baseline + by + row,
+							    color, alpha);
+				}
+			}
+		}
+		pen += zh_font_advance(&ui_font, glyph, px);
+	}
+}
+
 /* ------------------------------------------------------------ ウィンドウ */
 
-static void build_background(void)
+static uint32_t bilinear(uint32_t a, uint32_t b, uint32_t c, uint32_t d,
+			 uint32_t fx, uint32_t fy)
 {
+	uint64_t top = (uint64_t)a * (65536u - fx) + (uint64_t)b * fx;
+	uint64_t bottom = (uint64_t)c * (65536u - fx) + (uint64_t)d * fx;
+
+	return (uint32_t)((top * (65536u - fy) + bottom * fy) >> 32);
+}
+
+/* 1920x1080 などの壁紙を画面いっぱい (cover) にバイリニア拡大縮小する */
+static void draw_wallpaper(void)
+{
+	uint32_t scale_w;
+	uint32_t scale_h;
+	uint32_t scale;
+	uint32_t scaled_w;
+	uint32_t scaled_h;
+	uint32_t step_x;
+	uint32_t step_y;
+	uint32_t start_x;
+	uint32_t start_y;
+	int off_x;
+	int off_y;
 	int x;
 	int y;
 
-	for (y = 0; y < screen_h; y++) {
-		uint8_t r = (uint8_t)(16 + 22 * y / screen_h);
-		uint8_t g = (uint8_t)(22 + 34 * y / screen_h);
-		uint8_t b = (uint8_t)(50 + 92 * y / screen_h);
-		uint32_t color = rgb(r, g, b);
+	if (!wallpaper_rgba || wallpaper_w <= 0 || wallpaper_h <= 0)
+		return;
 
-		for (x = 0; x < screen_w; x++)
-			put_pixel(background, x, y, color);
+	scale_w = (uint32_t)(((uint64_t)screen_w << 16) /
+			     (uint32_t)wallpaper_w);
+	scale_h = (uint32_t)(((uint64_t)screen_h << 16) /
+			     (uint32_t)wallpaper_h);
+	scale = (scale_w > scale_h ? scale_w : scale_h) + 1;
+	scaled_w = (uint32_t)(((uint64_t)(uint32_t)wallpaper_w * scale) >> 16);
+	scaled_h = (uint32_t)(((uint64_t)(uint32_t)wallpaper_h * scale) >> 16);
+	off_x = ((int)scaled_w - screen_w) / 2;
+	off_y = ((int)scaled_h - screen_h) / 2;
+	if (off_x < 0)
+		off_x = 0;
+	if (off_y < 0)
+		off_y = 0;
+
+	step_x = (uint32_t)(((uint64_t)(uint32_t)wallpaper_w << 16) / scaled_w);
+	step_y = (uint32_t)(((uint64_t)(uint32_t)wallpaper_h << 16) / scaled_h);
+	start_x = (uint32_t)((((uint64_t)(uint32_t)off_x *
+			       (uint32_t)wallpaper_w) << 16) / scaled_w);
+	start_y = (uint32_t)((((uint64_t)(uint32_t)off_y *
+			       (uint32_t)wallpaper_h) << 16) / scaled_h);
+
+	for (y = 0; y < screen_h; y++) {
+		uint32_t sy = start_y + (uint32_t)y * step_y;
+		uint32_t fy = sy & 0xffffu;
+		int y0 = (int)(sy >> 16);
+		int y1;
+
+		if (y0 >= wallpaper_h)
+			y0 = wallpaper_h - 1;
+		y1 = y0 + 1 < wallpaper_h ? y0 + 1 : y0;
+
+		for (x = 0; x < screen_w; x++) {
+			uint32_t sx = start_x + (uint32_t)x * step_x;
+			uint32_t fx = sx & 0xffffu;
+			int x0 = (int)(sx >> 16);
+			int x1;
+			const uint8_t *p00;
+			const uint8_t *p10;
+			const uint8_t *p01;
+			const uint8_t *p11;
+			uint32_t r;
+			uint32_t g;
+			uint32_t b;
+
+			if (x0 >= wallpaper_w)
+				x0 = wallpaper_w - 1;
+			x1 = x0 + 1 < wallpaper_w ? x0 + 1 : x0;
+
+			p00 = wallpaper_rgba +
+			      ((size_t)y0 * (size_t)wallpaper_w + (size_t)x0) * 4u;
+			p10 = wallpaper_rgba +
+			      ((size_t)y0 * (size_t)wallpaper_w + (size_t)x1) * 4u;
+			p01 = wallpaper_rgba +
+			      ((size_t)y1 * (size_t)wallpaper_w + (size_t)x0) * 4u;
+			p11 = wallpaper_rgba +
+			      ((size_t)y1 * (size_t)wallpaper_w + (size_t)x1) * 4u;
+
+			r = bilinear(p00[0], p10[0], p01[0], p11[0], fx, fy);
+			g = bilinear(p00[1], p10[1], p01[1], p11[1], fx, fy);
+			b = bilinear(p00[2], p10[2], p01[2], p11[2], fx, fy);
+
+			/* ウィンドウと文字を読みやすくするため少し暗くする */
+			r = (r * 205u + 127u) / 255u;
+			g = (g * 205u + 127u) / 255u;
+			b = (b * 205u + 127u) / 255u;
+
+			put_pixel(background, x, y,
+				  rgb((uint8_t)r, (uint8_t)g, (uint8_t)b));
+		}
+	}
+}
+
+static void build_background(void)
+{
+	uint32_t title_color;
+	uint32_t footer_color;
+
+	if (wallpaper_rgba) {
+		draw_wallpaper();
+		title_color = rgb(196, 210, 234);
+		footer_color = rgb(200, 214, 234);
+	} else {
+		int x;
+		int y;
+
+		for (y = 0; y < screen_h; y++) {
+			uint8_t r = (uint8_t)(16 + 22 * y / screen_h);
+			uint8_t g = (uint8_t)(22 + 34 * y / screen_h);
+			uint8_t b = (uint8_t)(50 + 92 * y / screen_h);
+			uint32_t color = rgb(r, g, b);
+
+			for (x = 0; x < screen_w; x++)
+				put_pixel(background, x, y, color);
+		}
+		title_color = rgb(96, 128, 184);
+		footer_color = rgb(72, 96, 140);
 	}
 
-	draw_text(background, (screen_w - text_width("ZHIBOX OS", 4)) / 2,
-		  screen_h / 12, "ZHIBOX OS", rgb(96, 128, 184), 4);
+	ui_text(background, (screen_w - ui_text_width("ZHIBOX OS", 40)) / 2,
+		screen_h / 12, "ZHIBOX OS", title_color, 40);
 
-	draw_text(background,
-		  (screen_w - text_width("DRAG TITLE BAR   Q TO QUIT", 2)) / 2,
-		  screen_h - 40, "DRAG TITLE BAR   Q TO QUIT",
-		  rgb(72, 96, 140), 2);
+	ui_text(background,
+		(screen_w - ui_text_width("DRAG TITLE BAR   Q TO QUIT", 16)) / 2,
+		screen_h - 40, "DRAG TITLE BAR   Q TO QUIT", footer_color, 16);
 }
 
 static void draw_window(const struct window *window)
@@ -368,7 +659,7 @@ static void draw_window(const struct window *window)
 	rect_outline(scene, x, y, w, h, rgb(12, 16, 28));
 	rect_outline(scene, x, y, w, TITLE_H, window->bar);
 
-	draw_text(scene, x + 10, y + 5, window->title, rgb(255, 255, 255), 2);
+	ui_text(scene, x + 10, y + 2, window->title, rgb(255, 255, 255), 18);
 
 	if (window->kind == WIN_GRADIENT) {
 		int swatch_w = w - 4 * BORDER - 16;
@@ -405,9 +696,9 @@ static void draw_window(const struct window *window)
 		}
 
 		for (i = 0; i < 4; i++)
-			draw_text(scene, x + 2 * BORDER + 10,
-				  y + TITLE_H + 2 * BORDER + 10 + (int)i * 22,
-				  lines[i], rgb(226, 232, 244), 2);
+			ui_text(scene, x + 2 * BORDER + 10,
+				y + TITLE_H + 2 * BORDER + 10 + (int)i * 22,
+				lines[i], rgb(226, 232, 244), 16);
 	}
 }
 
@@ -681,6 +972,73 @@ static uint8_t *alloc_buffer(size_t length)
 	return mapping;
 }
 
+static void *read_file(const char *path, size_t *size_out)
+{
+	int fd;
+	off_t size;
+	uint8_t *data;
+	size_t total = 0;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return NULL;
+
+	size = lseek(fd, 0, SEEK_END);
+	if (size <= 0) {
+		close(fd);
+		return NULL;
+	}
+	if (lseek(fd, 0, SEEK_SET) != 0) {
+		close(fd);
+		return NULL;
+	}
+
+	data = alloc_buffer((size_t)size);
+	if (!data) {
+		close(fd);
+		return NULL;
+	}
+
+	while (total < (size_t)size) {
+		ssize_t chunk = read(fd, data + total, (size_t)size - total);
+
+		if (chunk <= 0)
+			break;
+		total += (size_t)chunk;
+	}
+	close(fd);
+
+	if (total != (size_t)size)
+		return NULL;
+	*size_out = total;
+	return data;
+}
+
+static void *asset_alloc(size_t length)
+{
+	return alloc_buffer(length);
+}
+
+static void load_assets(void)
+{
+	size_t size = 0;
+	uint8_t *data;
+
+	data = read_file(ZH_FONT_PATH, &size);
+	if (data && zh_font_init(&ui_font, data, size) == 0)
+		font_ready = 1;
+	printf("gradient: font %s\n",
+	       font_ready ? "loaded (TrueType)" : "unavailable (builtin)");
+
+	data = read_file(ZH_WALLPAPER_PATH, &size);
+	if (data && zh_png_decode(data, size, asset_alloc, &wallpaper_rgba,
+				  &wallpaper_w, &wallpaper_h) == 0)
+		printf("gradient: wallpaper %dx%d (PNG)\n",
+		       wallpaper_w, wallpaper_h);
+	else
+		printf("gradient: wallpaper unavailable (gradient)\n");
+}
+
 static void damage_add(int x, int y, int w, int h)
 {
 	int x2 = x + w;
@@ -869,6 +1227,8 @@ int main(void)
 		perror("mmap buffer");
 		return 1;
 	}
+
+	load_assets();
 
 	tty = open("/dev/tty0", O_RDWR);
 	if (tty < 0)

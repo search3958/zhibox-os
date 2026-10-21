@@ -13,7 +13,11 @@ scripts/
 │   └── common.sh          # 共通 bash (OS 判定・パス・ツール検出)
 ├── guest/                 # ゲスト (Linux) 側で動くもの
 │   ├── init               #   PID 1 (busybox sh)
-│   └── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ)
+│   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ)
+│   ├── zh_font.c/.h       #   TrueType パーサ / ラスタライザ (自前実装)
+│   ├── zh_png.c/.h        #   PNG デコーダ / inflate (自前実装)
+│   ├── HarmonyOS_Sans_SC_Regular.ttf  # UI フォント (initramfs へ同梱)
+│   └── wallpaper.png      #   壁紙 (initramfs へ同梱)
 ├── host/                  # ホスト OS に依存するもの
 │   ├── darwin/            #   macOS 専用
 │   │   ├── elf.h          #     ホストツール用ヘッダ

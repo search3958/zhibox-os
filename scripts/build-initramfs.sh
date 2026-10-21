@@ -15,6 +15,13 @@ BUSYBOX_CACHE="$OUT/cache/busybox-x86_64-static"
 
 rm -rf "$INITRAMFS"
 mkdir -p "$INITRAMFS"/{bin,sbin,proc,sys,dev,tmp,root,usr/bin,usr/sbin,usr/local/bin}
+mkdir -p "$INITRAMFS/usr/share/zhibox"
+
+# GUI 用アセット (TrueType フォント / PNG 壁紙)
+cp "$REPO_ROOT/scripts/guest/HarmonyOS_Sans_SC_Regular.ttf" \
+   "$INITRAMFS/usr/share/zhibox/font.ttf"
+cp "$REPO_ROOT/scripts/guest/wallpaper.png" \
+   "$INITRAMFS/usr/share/zhibox/wallpaper.png"
 
 if [ "$OS" = macos ]; then
   # ------------------------------------------------------------- macOS
@@ -47,6 +54,10 @@ if [ "$OS" = macos ]; then
       -o "$BUILD_GRADIENT/start.o"
     "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/guest/fb-gradient.c" \
       -o "$BUILD_GRADIENT/fb-gradient.o"
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/guest/zh_font.c" \
+      -o "$BUILD_GRADIENT/zh_font.o"
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/guest/zh_png.c" \
+      -o "$BUILD_GRADIENT/zh_png.o"
     "$XGCC" -nostdlib -static -no-pie -Wl,-e,_start \
       -o "$INITRAMFS/bin/gradient" "$BUILD_GRADIENT"/*.o
     chmod 0755 "$INITRAMFS/bin/gradient"
@@ -58,7 +69,10 @@ else
   [ -x /bin/busybox ] || fail "/bin/busybox がありません: apt install busybox-static"
   cp /bin/busybox "$INITRAMFS/bin/busybox"
   gcc -static -O2 -Wall -Wextra -Werror \
-    -o "$INITRAMFS/bin/gradient" "$REPO_ROOT/scripts/guest/fb-gradient.c"
+    -o "$INITRAMFS/bin/gradient" \
+    "$REPO_ROOT/scripts/guest/fb-gradient.c" \
+    "$REPO_ROOT/scripts/guest/zh_font.c" \
+    "$REPO_ROOT/scripts/guest/zh_png.c"
 fi
 
 cp "$REPO_ROOT/scripts/guest/init" "$INITRAMFS/init"

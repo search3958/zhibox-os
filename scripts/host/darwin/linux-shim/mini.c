@@ -19,6 +19,30 @@ void *memset(void *s, int c, size_t n)
 	return s;
 }
 
+void *memcpy(void *dst, const void *src, size_t n)
+{
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+
+	while (n--)
+		*d++ = *s++;
+	return dst;
+}
+
+int memcmp(const void *a, const void *b, size_t n)
+{
+	const unsigned char *p = a;
+	const unsigned char *q = b;
+
+	while (n--) {
+		if (*p != *q)
+			return (int)*p - (int)*q;
+		p++;
+		q++;
+	}
+	return 0;
+}
+
 static long checked(long result)
 {
 	if (result < 0 && result > -4096) {
@@ -46,6 +70,11 @@ int open(const char *path, int flags, ...)
 int close(int fd)
 {
 	return (int)checked(zh_syscall(ZH_SYS_close, fd, 0, 0));
+}
+
+off_t lseek(int fd, off_t offset, int whence)
+{
+	return checked(zh_syscall(ZH_SYS_lseek, fd, offset, whence));
 }
 
 int ioctl(int fd, unsigned long request, ...)

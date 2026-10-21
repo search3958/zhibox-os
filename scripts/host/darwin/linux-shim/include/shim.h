@@ -37,6 +37,7 @@ static inline long zh_syscall6(long nr, long a1, long a2, long a3,
 #define ZH_SYS_write		1
 #define ZH_SYS_open		2
 #define ZH_SYS_close		3
+#define ZH_SYS_lseek		8
 #define ZH_SYS_mmap		9
 #define ZH_SYS_munmap		11
 #define ZH_SYS_ioctl		16
@@ -58,6 +59,7 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int open(const char *path, int flags, ...);
 int close(int fd);
+off_t lseek(int fd, off_t offset, int whence);
 int ioctl(int fd, unsigned long request, ...);
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 int munmap(void *addr, size_t length);
@@ -81,6 +83,8 @@ extern void *stderr;
 #endif
 
 void *memset(void *s, int c, size_t n);
+void *memcpy(void *dst, const void *src, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
 
 /* ------------------------------------------------------------ fcntl */
 #define O_RDWR		02
@@ -159,6 +163,11 @@ struct fb_var_screeninfo {
 /* ------------------------------------------------------------ fcntl */
 #define O_RDONLY	0
 #define O_NONBLOCK	04000
+
+/* ------------------------------------------------------------ lseek */
+#define SEEK_SET	0
+#define SEEK_CUR	1
+#define SEEK_END	2
 
 /* ------------------------------------------------------------ mman */
 #define MAP_PRIVATE	0x02

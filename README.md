@@ -93,6 +93,8 @@ bash scripts/boot-gui.sh
 
 GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起動します。
 
+- **壁紙**: `wallpaper.png` を画面いっぱい (cover) に縮小表示
+- **文字**: `HarmonyOS_Sans_SC_Regular.ttf` を TrueType レンダリングで描画
 - **マウス**: QEMU ウィンドウ内をクリックしてポインタをグラブ（PS/2 マウス）
 - **ウィンドウ**: タイトルバーをドラッグで移動、クリックで最前面へ
 - **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
@@ -109,6 +111,37 @@ GUI 起動では QEMU の **virtio-gpu** (`-vga virtio`) を使います。
 - 起動ログに `gradient: drm acceleration on (virtio-gpu)` と出れば加速パスが有効
 - なお Homebrew の QEMU (macOS) は virglrenderer 非対応のため、
   OpenGL/3D のハードウェアアクセラレーションは対象外（2D の転送高速化まで）
+
+### 壁紙 (PNG) と TrueType フォント
+
+ゲスト側で自前のデコーダを使うため、libpng / zlib / libfreetype は不要です
+（macOS の freestanding クロスビルドでもそのまま動きます）。
+
+| ホスト側のファイル | initramfs 内のパス | 用途 |
+|---|---|---|
+| `scripts/guest/wallpaper.png` | `/usr/share/zhibox/wallpaper.png` | 壁紙 |
+| `scripts/guest/HarmonyOS_Sans_SC_Regular.ttf` | `/usr/share/zhibox/font.ttf` | UI フォント |
+
+- **PNG**: 8bit・非インターレースの color type 0/2/3/4/6 に対応。
+  zlib の inflate と PNG フィルタ復元を内蔵し、RGBA に展開後、
+  アスペクト比を保って画面を覆うようにバイリニア縮小（約 80% に減光）
+- **TrueType**: `head` / `maxp` / `hhea` / `hmtx` / `cmap` (format 4/12) /
+  `loca` / `glyf` を読み、2 次ベジェを整数 26.6 固定小数点で
+  4 倍垂直スーパーサンプリング + 水平被覆率により描画
+- フォントや壁紙が見つからない場合は、従来のグラデーション背景と
+  5x7 ビットマップフォントに自動フォールバック
+- 起動ログで確認できます:
+  ```
+  gradient: font loaded (TrueType)
+  gradient: wallpaper 1920x1080 (PNG)
+  ```
+- **差し替え方法**: 上記 2 ファイルを置き換えて initramfs だけ再生成すれば
+  反映されます（カーネルの再ビルドは不要）:
+  ```bash
+  bash scripts/build-initramfs.sh
+  cp ~/initramfs.cpio.gz output/initramfs.cpio.gz   # GUI 起動が参照する場所
+  bash scripts/boot-gui.sh
+  ```
 
 **シリアルコンソール（対話・-nographic）**:
 
@@ -167,7 +200,7 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
-| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` |
+| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / フォント・壁紙アセット |
 | `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
 | `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助スクリプト |
 | `scripts/tools/` | ホスト共通ツール: `k.sh` / `case-collision-report.sh` |

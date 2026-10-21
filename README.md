@@ -41,6 +41,8 @@ bash scripts/tools/k.sh log --oneline -5
 - gcc 11.4 / make / flex / bison / libelf / libssl / bc / cpio / dwarves / rsync / git
 - **qemu-system-x86_64** + **qemu-system-gui**（画面表示用 GTK/SDL）
 - **busybox-static**（initramfs 用 = distro パッケージ）
+- HTML+CSS ウィンドウのレンダリング用（任意）:
+  `python3-gi` / `gir1.2-webkit2-4.0` / `libwebkit2gtk-4.0-37` / `xvfb`
 - ビルドツリーは WSL の ext4 上 `~/kernel-src` に展開して使用
   （Windows の 9p マウントは遅く、かつ大文字小文字の制約を受けるため）
 
@@ -60,6 +62,8 @@ brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils
 - initramfs の `gradient`（フレームバッファ描画デモ）も macOS で生成できる。Linux 用の
   静的 libc が無いため、`scripts/host/darwin/linux-shim/`（syscall 直叩きの最小 libc 代替）と
   `x86_64-elf-gcc` で freestanding な静的 ELF としてクロスビルドする（追加依存なし）
+- HTML+CSS のレンダリングは **システムの WebKit (WKWebView)** を使う
+  （WebKitGTK は Linux 専用のため）。`swiftc`（Xcode Command Line Tools）が必要
 - QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
 ## ビルド + 起動確認（1コマンド）
@@ -97,6 +101,7 @@ GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起�
 - **文字**: `HarmonyOS_Sans_SC_Regular.ttf` を TrueType レンダリングで描画
 - **マウス**: QEMU ウィンドウ内をクリックしてポインタをグラブ（PS/2 マウス）
 - **ウィンドウ**: タイトルバーをドラッグで移動、クリックで最前面へ
+- **HTML+CSS**: 4 番目の `WEBKIT` ウィンドウに表示（WebKit / JavaScript 無効）
 - **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
 
 ### GPU アクセラレーション (virtio-gpu)
@@ -143,13 +148,85 @@ GUI 起動では QEMU の **virtio-gpu** (`-vga virtio`) を使います。
   bash scripts/boot-gui.sh
   ```
 
-**シリアルコンソール（対話・-nographic）**:
+### HTML+CSS ウィンドウ (WebKit / JavaScript 無効)
+
+`scripts/guest/web/index.html` を WebKit でレンダリングし、**PNG を介さず
+raw RGBA のまま** initramfs に同梱して、デスクトップの 4 番目のウィンドウ
+(`WEBKIT`) に表示します。
+
+```
+HTML+CSS --[WebKitGTK (WSL) / WKWebView (macOS), JS off]--> raw RGBA
+         --[initramfs]--> /usr/share/zhibox/html.raw
+         --[gradient]--> バイリニア縮小 --> /dev/fb0 の WEBKIT ウィンドウ
+```
+
+- **レンダリング**: 既定 640x400。ウィンドウ本文 (約 500x313) に
+  アスペクト比を保って縮小するため、文字が読めるサイズになる
+- **JavaScript 無効**: WebKitGTK は `WebKitSettings:enable-javascript=FALSE`、
+  macOS は `WKWebpagePreferences.allowsContentJavaScript = NO`。さらに
+  HTML 側の CSP でも script を禁止。ページ内の `<noscript>` バッジで確認できる
+- **macOS と WSL の違い**: WebKitGTK は Linux 専用 (Homebrew の bottle も
+  Linux のみ) のため、macOS は同じ WebKit エンジンのシステムフレームワーク
+  (WKWebView) を使う。WSL は WebKitGTK を使う
+- **静的スナップショット**: ビルド時にレンダリングする。ページ内のスクロールや
+  リンク操作はできないが、ウィンドウのドラッグ・前面化は通常どおり動く
+
+**WSL の依存パッケージ** (初回のみ):
+
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+    gir1.2-webkit2-4.0 libwebkit2gtk-4.0-37 xvfb fonts-dejavu-core
+# Ubuntu 24.04 以降は gir1.2-webkit2-4.1 / libwebkit2gtk-4.1-0
+```
+
+**単体でレンダリング / 確認**:
+
+```bash
+bash scripts/render-html.sh            # -> output/html.raw
+bash scripts/render-html.sh /tmp/x.raw # 出力先を指定
+```
+
+`build-initramfs.sh` は自動で `render-html.sh` を呼びます。WebKit が無い環境では
+警告を出して続行し、ゲスト側は `HTML RENDER UNAVAILABLE` のプレースホルダーに
+なります。レンダリングをスキップしたい場合は `ZH_HTML_RENDER=0`、
+既存の raw を使う場合は `ZH_HTML_RAW=/path/to/html.raw` を指定してください。
+
+```bash
+bash scripts/build-initramfs.sh
+cp ~/initramfs.cpio.gz output/initramfs.cpio.gz
+bash scripts/boot-gui.sh
+```
+
+起動ログに次のように出れば、raw の読み込みと縮小キャッシュが成功しています:
+
+```
+gradient: html 640x400 (raw RGBA, JS off)
+gradient: html 640x400 -> 500x313 (raw RGBA)
+```
+
+raw 形式 (リトルエンディアン):
+
+| オフセット | 内容 |
+|---|---|
+| 0 | magic 8 bytes `ZHRAW1\0\0` |
+| 8 | u32 width |
+| 12 | u32 height |
+| 16 | u32 format (0 = RGBA8888) |
+| 20 | u32 stride (bytes) |
+| 24 | RGBA 画素 (先頭が上端) |
+
+- ページを変更したら `bash scripts/build-initramfs.sh` を再実行する
+  （カーネルの再ビルドは不要）
+- 解像度を変える: `ZH_HTML_WIDTH=800 ZH_HTML_HEIGHT=500 bash scripts/render-html.sh`
+  （ウィンドウ側は自動でフィットする）
+
+### シリアルコンソール（対話・-nographic）
 
 ```bash
 bash scripts/boot-qemu.sh
 ```
 
-- シリアル起動ではデモは自動起動しません（`gradient` と入力すると起動、`q` で終了）
+- シリアル起動ではデモは自動起動しません（`gradient` と入力すると起動、`q` + Enter で終了）
 - どちらも `/` に着地し busybox シェルが待機（`Linux (none) 5.10.0 ...`）
 - 終了: 画面の `poweroff -f`、または `Ctrl+A` → `X`（nographic 時）
 - macOS は TCG のため起動に数分かかる（スクリプトは最大300秒待つ）
@@ -196,13 +273,14 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | パス | 用途 |
 |---|---|
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
-| `scripts/build-initramfs.sh` | busybox + gradient の initramfs を生成 |
+| `scripts/build-initramfs.sh` | busybox + gradient + WebKit raw の initramfs を生成 |
+| `scripts/render-html.sh` | HTML+CSS を WebKit で raw RGBA にレンダリング (WSL/macOS 分岐) |
 | `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
-| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / フォント・壁紙アセット |
-| `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
-| `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助スクリプト |
+| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / フォント・壁紙アセット |
+| `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` / `render-html.swift` (WKWebView) |
+| `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助 / `render-html.py` (WebKitGTK) |
 | `scripts/tools/` | ホスト共通ツール: `k.sh` / `case-collision-report.sh` |
 
 > ディレクトリ構成の詳細と、新しいスクリプトを置く場所は `scripts/README.md` を参照。

@@ -7,6 +7,7 @@
 scripts/
 ├── build-and-boot.sh      # エントリ: ビルド → initramfs → 起動確認
 ├── build-initramfs.sh     # エントリ: initramfs 生成
+├── render-html.sh         # エントリ: HTML+CSS → raw RGBA (WebKit, JS 無効)
 ├── boot-qemu.sh           # エントリ: シリアル起動
 ├── boot-gui.sh            # エントリ: GUI 起動
 ├── lib/
@@ -16,15 +17,18 @@ scripts/
 │   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ)
 │   ├── zh_font.c/.h       #   TrueType パーサ / ラスタライザ (自前実装)
 │   ├── zh_png.c/.h        #   PNG デコーダ / inflate (自前実装)
+│   ├── web/index.html     #   WebKit で描画する HTML+CSS (JS なし)
 │   ├── HarmonyOS_Sans_SC_Regular.ttf  # UI フォント (initramfs へ同梱)
 │   └── wallpaper.png      #   壁紙 (initramfs へ同梱)
 ├── host/                  # ホスト OS に依存するもの
 │   ├── darwin/            #   macOS 専用
+│   │   ├── render-html.swift  # WKWebView で HTML → raw RGBA
 │   │   ├── elf.h          #     ホストツール用ヘッダ
 │   │   ├── byteswap.h
 │   │   ├── endian.h
 │   │   └── linux-shim/    #     静的 Linux ELF を作る最小 libc
 │   └── wsl/               #   WSL / Windows 専用
+│       ├── render-html.py #     WebKitGTK で HTML → raw RGBA
 │       ├── aux-scan.sh
 │       ├── fix-missing-files.sh
 │       ├── lfs-scan.sh

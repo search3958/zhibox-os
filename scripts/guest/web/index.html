@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
+<title>ZHIBox OS - WebKit Surface</title>
+<style>
+:root {
+  --bg: #070b14;
+  --panel: rgba(18, 26, 43, 0.88);
+  --line: rgba(120, 160, 220, 0.16);
+  --text: #e8eefc;
+  --muted: #8fa3c4;
+  --accent: #5eead4;
+  --accent-2: #7dd3fc;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(900px 500px at 12% 0%, rgba(45, 212, 191, 0.18), transparent 60%),
+    radial-gradient(800px 500px at 95% 10%, rgba(59, 130, 246, 0.20), transparent 55%),
+    linear-gradient(160deg, #070b14 0%, #0b1220 55%, #070a12 100%);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+               "DejaVu Sans", sans-serif;
+  overflow: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(125, 211, 252, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+  -webkit-mask-image: radial-gradient(circle at 50% 20%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 20%, #000 0%, transparent 78%);
+  pointer-events: none;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 18px 22px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2dd4bf, #3b82f6);
+  box-shadow: 0 8px 24px rgba(45, 212, 191, 0.28),
+              inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 17px;
+  color: #03131a;
+  letter-spacing: -0.5px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.2px;
+}
+
+.brand p {
+  margin: 1px 0 0;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.pills {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pill {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.65);
+  padding: 5px 8px;
+  border-radius: 999px;
+}
+
+.pill.ok {
+  color: #a7f3d0;
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(16, 185, 129, 0.10);
+}
+
+.pill.off {
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.window {
+  margin-top: 14px;
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 180, 230, 0.18);
+  background: linear-gradient(180deg, rgba(19, 28, 46, 0.92),
+              rgba(10, 16, 28, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.titlebar {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(38, 52, 78, 0.95),
+              rgba(24, 34, 54, 0.95));
+  border-bottom: 1px solid var(--line);
+}
+
+.dots {
+  display: flex;
+  gap: 5px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+
+.dot.r { background: #fb7185; }
+.dot.y { background: #fbbf24; }
+.dot.g { background: #34d399; }
+
+.addr {
+  margin-left: 6px;
+  flex: 1;
+  font-size: 9px;
+  color: #9fb1cf;
+  background: rgba(5, 10, 20, 0.55);
+  border: 1px solid rgba(120, 150, 200, 0.14);
+  border-radius: 6px;
+  padding: 4px 8px;
+  letter-spacing: 0.3px;
+}
+
+.titlebar .hint {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.hero h2 {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.05;
+  letter-spacing: -0.8px;
+  background: linear-gradient(100deg, #ffffff 5%, #a7f3d0 45%, #7dd3fc 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero p {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 390px;
+  line-height: 1.45;
+}
+
+.badge {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.badge .big {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a7f3d0;
+}
+
+.badge .small {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: linear-gradient(180deg, rgba(30, 43, 68, 0.65),
+              rgba(15, 23, 40, 0.55));
+  min-width: 0;
+}
+
+.card .k {
+  font-size: 8px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card .v {
+  margin-top: 3px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card .n {
+  margin-top: 2px;
+  font-size: 8.5px;
+  color: #7f93b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card.accent .v { color: #5eead4; }
+.card.blue .v { color: #7dd3fc; }
+.card.warn .v { color: #fbbf24; }
+
+.meter {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.meter .label {
+  font-size: 8px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.bars {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  height: 6px;
+}
+
+.bars i {
+  flex: 1;
+  border-radius: 99px;
+  background: rgba(125, 211, 252, 0.14);
+}
+
+.bars i.on {
+  background: linear-gradient(90deg, #2dd4bf, #3b82f6);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.25);
+}
+
+.meter .value {
+  font-size: 9px;
+  color: #a7f3d0;
+  white-space: nowrap;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 8.5px;
+  color: #6f83a5;
+  padding-top: 8px;
+}
+
+.footer b {
+  color: #9fb1cf;
+  font-weight: 600;
+}
+
+.badge .ns {
+  margin-top: 2px;
+  font-size: 8px;
+  color: #fde68a;
+  letter-spacing: 0.3px;
+}
+</style>
+</head>
+<body>
+<div class="stage">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">Z</div>
+      <div>
+        <h1>ZHIBox OS</h1>
+        <p>WebKit surface &middot; HTML + CSS</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill ok">WebKit engine</span>
+      <span class="pill off">JS disabled</span>
+      <span class="pill">raw RGBA</span>
+    </div>
+  </header>
+
+  <section class="window">
+    <div class="titlebar">
+      <div class="dots"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i></div>
+      <div class="addr">zhibox://surface/dashboard</div>
+      <div class="hint">framebuffer window</div>
+    </div>
+    <div class="content">
+      <div class="hero">
+        <div>
+          <h2>HTML + CSS,<br>no JavaScript.</h2>
+          <p>A WebKit-rendered surface delivered to the guest as raw RGBA
+             pixels. The window system moves it, the engine only paints it.</p>
+        </div>
+        <div class="badge">
+          <span class="big">RENDER OK</span>
+          <span class="small">RGBA8888 snapshot</span>
+          <noscript class="ns">JS OFF &middot; noscript active</noscript>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card accent"><div class="k">Engine</div><div class="v">WebKit</div><div class="n">GTK port / WKWebView</div></div>
+        <div class="card warn"><div class="k">Scripting</div><div class="v">OFF</div><div class="n">engine policy + CSP</div></div>
+        <div class="card blue"><div class="k">Layout</div><div class="v">Grid</div><div class="n">flex &middot; gradients &middot; radius</div></div>
+        <div class="card"><div class="k">Transport</div><div class="v">ZHRAW1</div><div class="n">no PNG in the pipeline</div></div>
+      </div>
+
+      <div class="meter">
+        <span class="label">pipeline</span>
+        <div class="bars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
+        <span class="value">snapshot &rarr; initramfs &rarr; /dev/fb0</span>
+      </div>
+      <div class="footer">
+        <span><b>Window:</b> drag the title bar &middot; click to raise</span>
+        <span><b>Quit:</b> Q / Esc</span>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

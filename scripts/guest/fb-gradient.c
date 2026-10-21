@@ -32,11 +32,13 @@
 #define BORDER		2
 #define CURSOR_W	10
 #define CURSOR_H	16
-#define WINDOW_COUNT	3
+#define WINDOW_COUNT	4
+#define HTML_INDEX	3
 
 enum {
 	WIN_GRADIENT,
 	WIN_TEXT,
+	WIN_HTML,
 };
 
 struct window {
@@ -71,12 +73,13 @@ static struct termios saved_tty;
 static int tty_raw;
 
 static struct window windows[WINDOW_COUNT];
-static int stacking[WINDOW_COUNT] = {0, 1, 2};
+static int stacking[WINDOW_COUNT] = {0, 1, 2, 3};
 
 /* ------------------------------------------------------------ フォント / 壁紙 */
 
 #define ZH_FONT_PATH		"/usr/share/zhibox/font.ttf"
 #define ZH_WALLPAPER_PATH	"/usr/share/zhibox/wallpaper.png"
+#define ZH_HTML_PATH		"/usr/share/zhibox/html.raw"
 
 static struct zh_font ui_font;
 static int font_ready;
@@ -84,6 +87,28 @@ static uint8_t *wallpaper_rgba;
 static int wallpaper_w;
 static int wallpaper_h;
 static uint8_t text_mask[128 * 128];
+
+/* ------------------------------------------------------------ HTML (WebKit)
+ *
+ * ホスト側で WebKit (WSL は WebKitGTK、macOS は WKWebView) が HTML+CSS を
+ * レンダリングし、PNG を介さず raw RGBA として initramfs に同梱する。
+ * ゲストはそれを読み、ウィンドウ本文サイズへバイリニア縮小してキャッシュする。
+ * ドラッグのたびに 640x400 から縮小しないよう、起動時に一度だけ変換する。
+ */
+struct html_surface {
+	uint8_t *rgba;
+	int src_w;
+	int src_h;
+	int stride;
+	int raw_ok;
+	uint32_t *scaled;
+	int scaled_w;
+	int scaled_h;
+	int off_x;
+	int off_y;
+};
+
+static struct html_surface html_view;
 
 /* ------------------------------------------------------------ DRM 加速
  *
@@ -638,9 +663,8 @@ static void build_background(void)
 	ui_text(background, (screen_w - ui_text_width("ZHIBOX OS", 40)) / 2,
 		screen_h / 12, "ZHIBOX OS", title_color, 40);
 
-	ui_text(background,
-		(screen_w - ui_text_width("DRAG TITLE BAR   Q TO QUIT", 16)) / 2,
-		screen_h - 40, "DRAG TITLE BAR   Q TO QUIT", footer_color, 16);
+	ui_text(background, 20, screen_h - 34,
+		"DRAG TITLE BAR   Q TO QUIT", footer_color, 16);
 }
 
 static void draw_window(const struct window *window)
@@ -679,7 +703,36 @@ static void draw_window(const struct window *window)
 		rect_outline(scene, x + 2 * BORDER + 8,
 			     y + TITLE_H + 2 * BORDER + 8, swatch_w,
 			     swatch_h, rgb(12, 16, 28));
-	} else {
+	} else if (window->kind == WIN_HTML) {
+		int bx = x + 2 * BORDER + 6 + html_view.off_x;
+		int by = y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
+
+		if (html_view.scaled) {
+			int row;
+			int column;
+
+			for (row = 0; row < html_view.scaled_h; row++)
+				for (column = 0;
+				     column < html_view.scaled_w; column++)
+					put_pixel(scene, bx + column,
+						  by + row,
+						  html_view.scaled[
+							  (size_t)row *
+								  html_view.scaled_w +
+							  column]);
+			rect_outline(scene, bx - 1, by - 1,
+				     html_view.scaled_w + 2,
+				     html_view.scaled_h + 2,
+				     rgb(96, 128, 152));
+		} else {
+			const char *message = "HTML RENDER UNAVAILABLE";
+
+			ui_text(scene,
+				x + (w - ui_text_width(message, 16)) / 2,
+				y + TITLE_H + (h - TITLE_H) / 2 - 8,
+				message, rgb(200, 214, 234), 16);
+		}
+	} else if (window->kind == WIN_TEXT) {
 		const char *lines[] = {
 			"ZHIBOX OS",
 			"OLK-5.10",
@@ -1039,6 +1092,168 @@ static void load_assets(void)
 		printf("gradient: wallpaper unavailable (gradient)\n");
 }
 
+/* ------------------------------------------------------------ HTML raw */
+
+static uint32_t raw_le32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int html_raw_load(void)
+{
+	static const uint8_t magic[8] = {'Z', 'H', 'R', 'A', 'W', '1', 0, 0};
+	size_t size = 0;
+	uint8_t *data = read_file(ZH_HTML_PATH, &size);
+	uint32_t width;
+	uint32_t height;
+	uint32_t format;
+	uint32_t stride;
+
+	if (!data)
+		return -1;
+	if (size < 24 || memcmp(data, magic, sizeof(magic)) != 0)
+		return -1;
+
+	width = raw_le32(data + 8);
+	height = raw_le32(data + 12);
+	format = raw_le32(data + 16);
+	stride = raw_le32(data + 20);
+
+	if (format != 0 || width == 0 || height == 0 ||
+	    width > 8192 || height > 8192 || stride < width * 4)
+		return -1;
+	if (size < 24 + (size_t)stride * height)
+		return -1;
+
+	html_view.rgba = data + 24;
+	html_view.src_w = (int)width;
+	html_view.src_h = (int)height;
+	html_view.stride = (int)stride;
+	html_view.raw_ok = 1;
+	return 0;
+}
+
+static void prepare_html_cache(void)
+{
+	const struct window *window = &windows[HTML_INDEX];
+	int max_w;
+	int max_h;
+	int dw;
+	int dh;
+	int x;
+	int y;
+	uint32_t *scaled;
+
+	if (!html_view.raw_ok)
+		return;
+
+	max_w = window->w - 4 * BORDER - 12;
+	max_h = window->h - TITLE_H - 4 * BORDER - 12;
+	if (max_w <= 0 || max_h <= 0)
+		return;
+
+	/* アスペクト比を保って本文にフィットさせる */
+	if ((long)max_w * html_view.src_h <= (long)max_h * html_view.src_w) {
+		dw = max_w;
+		dh = (html_view.src_h * dw + html_view.src_w / 2) /
+		     html_view.src_w;
+	} else {
+		dh = max_h;
+		dw = (html_view.src_w * dh + html_view.src_h / 2) /
+		     html_view.src_h;
+	}
+	if (dw <= 0 || dh <= 0)
+		return;
+
+	scaled = (uint32_t *)alloc_buffer((size_t)dw * dh *
+					  sizeof(*scaled));
+	if (!scaled) {
+		printf("gradient: html cache allocation failed\n");
+		return;
+	}
+
+	/* 8.8 固定小数点のバイリニア補間 */
+	for (y = 0; y < dh; y++) {
+		int fy = ((2 * y + 1) * html_view.src_h * 256) / (2 * dh) - 128;
+		int y0;
+		int y1;
+		int wy;
+		const uint8_t *row0;
+		const uint8_t *row1;
+
+		if (fy < 0)
+			fy = 0;
+		y0 = fy >> 8;
+		wy = fy & 255;
+		y1 = y0 + 1;
+		if (y1 >= html_view.src_h) {
+			y1 = html_view.src_h - 1;
+			y0 = y1;
+			wy = 0;
+		}
+		row0 = html_view.rgba + (size_t)y0 * html_view.stride;
+		row1 = html_view.rgba + (size_t)y1 * html_view.stride;
+
+		for (x = 0; x < dw; x++) {
+			int fx = ((2 * x + 1) * html_view.src_w * 256) /
+				 (2 * dw) - 128;
+			int x0;
+			int x1;
+			int wx;
+			const uint8_t *p00;
+			const uint8_t *p10;
+			const uint8_t *p01;
+			const uint8_t *p11;
+			int w00;
+			int w10;
+			int w01;
+			int w11;
+			int r;
+			int g;
+			int b;
+
+			if (fx < 0)
+				fx = 0;
+			x0 = fx >> 8;
+			wx = fx & 255;
+			x1 = x0 + 1;
+			if (x1 >= html_view.src_w) {
+				x1 = html_view.src_w - 1;
+				x0 = x1;
+				wx = 0;
+			}
+
+			p00 = row0 + (size_t)x0 * 4;
+			p10 = row0 + (size_t)x1 * 4;
+			p01 = row1 + (size_t)x0 * 4;
+			p11 = row1 + (size_t)x1 * 4;
+			w00 = (256 - wx) * (256 - wy);
+			w10 = wx * (256 - wy);
+			w01 = (256 - wx) * wy;
+			w11 = wx * wy;
+
+			r = (p00[0] * w00 + p10[0] * w10 +
+			     p01[0] * w01 + p11[0] * w11) >> 16;
+			g = (p00[1] * w00 + p10[1] * w10 +
+			     p01[1] * w01 + p11[1] * w11) >> 16;
+			b = (p00[2] * w00 + p10[2] * w10 +
+			     p01[2] * w01 + p11[2] * w11) >> 16;
+			scaled[(size_t)y * dw + x] =
+				rgb((uint8_t)r, (uint8_t)g, (uint8_t)b);
+		}
+	}
+
+	html_view.scaled = scaled;
+	html_view.scaled_w = dw;
+	html_view.scaled_h = dh;
+	html_view.off_x = (max_w - dw) / 2;
+	html_view.off_y = (max_h - dh) / 2;
+	printf("gradient: html %dx%d -> %dx%d (raw RGBA)\n",
+	       html_view.src_w, html_view.src_h, dw, dh);
+}
+
+
 static void damage_add(int x, int y, int w, int h)
 {
 	int x2 = x + w;
@@ -1207,6 +1422,26 @@ static void layout_windows(void)
 	windows[2].body = rgb(30, 44, 40);
 	windows[2].bar = rgb(52, 132, 104);
 	windows[2].kind = WIN_TEXT;
+
+	/* HTML (WebKit) ウィンドウ: 右下に 520x360 程度で配置 */
+	windows[HTML_INDEX].w = screen_w / 2 - 120;
+	if (windows[HTML_INDEX].w < 300)
+		windows[HTML_INDEX].w = screen_w - 40;
+	if (windows[HTML_INDEX].w > 560)
+		windows[HTML_INDEX].w = 560;
+	windows[HTML_INDEX].h = windows[HTML_INDEX].w * 9 / 13;
+	if (windows[HTML_INDEX].h > screen_h - 80)
+		windows[HTML_INDEX].h = screen_h - 80;
+	windows[HTML_INDEX].x = screen_w - windows[HTML_INDEX].w - 40;
+	if (windows[HTML_INDEX].x < 0)
+		windows[HTML_INDEX].x = 0;
+	windows[HTML_INDEX].y = screen_h - windows[HTML_INDEX].h - 20;
+	if (windows[HTML_INDEX].y < 0)
+		windows[HTML_INDEX].y = 0;
+	windows[HTML_INDEX].title = "WEBKIT";
+	windows[HTML_INDEX].body = rgb(8, 14, 26);
+	windows[HTML_INDEX].bar = rgb(38, 92, 120);
+	windows[HTML_INDEX].kind = WIN_HTML;
 }
 
 int main(void)
@@ -1229,6 +1464,11 @@ int main(void)
 	}
 
 	load_assets();
+	if (html_raw_load() == 0)
+		printf("gradient: html %dx%d (raw RGBA, JS off)\n",
+		       html_view.src_w, html_view.src_h);
+	else
+		printf("gradient: html render unavailable (placeholder)\n");
 
 	tty = open("/dev/tty0", O_RDWR);
 	if (tty < 0)
@@ -1260,6 +1500,7 @@ int main(void)
 	printf("gradient: drag title bar / q to quit\n");
 
 	layout_windows();
+	prepare_html_cache();
 	build_background();
 	build_scene();
 	blit_full();

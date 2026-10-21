@@ -23,6 +23,20 @@ cp "$REPO_ROOT/scripts/guest/HarmonyOS_Sans_SC_Regular.ttf" \
 cp "$REPO_ROOT/scripts/guest/wallpaper.png" \
    "$INITRAMFS/usr/share/zhibox/wallpaper.png"
 
+# HTML+CSS (WebKit) を raw RGBA にレンダリングして同梱する。
+#   ZH_HTML_RENDER=0 でスキップ、ZH_HTML_RAW=path で既存ファイルを使う。
+#   レンダリングに失敗しても framebuffer デモ自体は動くよう、警告のみで続行する。
+if [ -n "${ZH_HTML_RAW:-}" ] && [ -f "${ZH_HTML_RAW}" ]; then
+  cp "$ZH_HTML_RAW" "$INITRAMFS/usr/share/zhibox/html.raw"
+  say "HTML raw を同梱 (${ZH_HTML_RAW})"
+elif [ "${ZH_HTML_RENDER:-1}" != 0 ]; then
+  if bash "$REPO_ROOT/scripts/render-html.sh" "$OUT/html.raw"; then
+    cp "$OUT/html.raw" "$INITRAMFS/usr/share/zhibox/html.raw"
+  else
+    echo "    [warn] HTML レンダリングをスキップ (WEBKIT ウィンドウはプレースホルダー)"
+  fi
+fi
+
 if [ "$OS" = macos ]; then
   # ------------------------------------------------------------- macOS
   if [ ! -x "$BUSYBOX_CACHE" ]; then

@@ -11,7 +11,7 @@ echo "=============================================="
 uname -a
 echo
 echo "ZHIBOX_BOOT_OK"
-echo "Type 'gradient' to switch to the video mode."
+[ -x /bin/gradient ] && echo "Type 'gradient' to switch to the video mode."
 echo "=============================================="
 if grep -q boottest /proc/cmdline 2>/dev/null; then
   echo "(boot test mode -> poweroff)"

@@ -3,6 +3,9 @@
 `https://gitee.com/openeuler/kernel.git` の **OLK-5.10** を取得し、
 **QEMU 上で実際にブートできる**状態まで構築したワークスペース。
 
+ビルドは **WSL (Ubuntu)** と **macOS (Apple Silicon, ネイティブ)** の両方に対応しています。
+スクリプトが `uname` で自動判定して分岐します。Linux コンテナや VM は使いません。
+
 ## 構成
 
 | パス | 内容 | サイズ |
@@ -30,46 +33,70 @@ bash scripts/k.sh status
 bash scripts/k.sh log --oneline -5
 ```
 
-## 必要な環境（すべて導入済み）
+## 必要な環境
 
-- **WSL: Ubuntu 22.04** — vhdx は `D:\wsl\Ubuntu-22.04`（C: の空きを守るため D: 配置）
-  - gcc 11.4 / make / flex / bison / libelf / libssl / bc / cpio / dwarves / rsync / git
-  - **qemu-system-x86_64** + **qemu-system-gui**（画面表示用 GTK/SDL）
-  - **busybox-static**（initramfs 用）
-- ビルドツリーは WSL の ext4 上 `/root/kernel-src` に展開して使用
+### WSL: Ubuntu 22.04
+
+- vhdx は `D:\wsl\Ubuntu-22.04`（C: の空きを守るため D: 配置）
+- gcc 11.4 / make / flex / bison / libelf / libssl / bc / cpio / dwarves / rsync / git
+- **qemu-system-x86_64** + **qemu-system-gui**（画面表示用 GTK/SDL）
+- **busybox-static**（initramfs 用 = distro パッケージ）
+- ビルドツリーは WSL の ext4 上 `~/kernel-src` に展開して使用
   （Windows の 9p マウントは遅く、かつ大文字小文字の制約を受けるため）
+
+### macOS: Apple Silicon（ネイティブ、コンテナ不要）
+
+```bash
+brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils findutils
+```
+
+- カーネルはフリースタンディングなので、`*-elf-gcc`（ベアメタル向け）でクロスコンパイルできる
+- APFS は大文字小文字を区別しないため、**ケースセンシティブ APFS のスパースバンドル**
+  (`~/zhibox-kernel.sparsebundle` → `/Volumes/zhibox-kernel`) を初回に自動作成し、
+  その中の `/Volumes/zhibox-kernel/src` でビルドする（sudo 不要・使用分だけ拡張）
+- ホストツール用に `scripts/host-include/darwin/` の `elf.h` / `byteswap.h` / `endian.h` を
+  差し込むほか、新しめの GCC/binutils 向けの小さなソース修正をスクリプト内で自動適用する
+  （すべて冪等。詳細は `scripts/build-and-boot.sh` の macOS ブロック）
+- QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
 ## ビルド + 起動確認（1コマンド）
 
-```powershell
-wsl -d Ubuntu-22.04 -u root -e bash "/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/scripts/build-and-boot.sh"
+```bash
+# WSL / macOS 共通 (リポジトリ直下で実行)
+bash scripts/build-and-boot.sh
 ```
 
-1. git オブジェクトから**完全な**ツリーを WSL ext4 へ展開
-2. `make defconfig` → 3. `make -j$(nproc) bzImage` → 4. busybox initramfs 生成
+```powershell
+# Windows からは WSL 経由 (パスは環境に合わせて)
+wsl -d Ubuntu-22.04 -u root -e bash /mnt/c/.../zhibox-os/scripts/build-and-boot.sh
+```
+
+1. git オブジェクトから**完全な**ツリーを展開（macOS はスパースバンドルをマウント）
+2. `make defconfig` → 3. `make -j bzImage` → 4. busybox initramfs 生成
 5. **QEMU でブート確認**（`ZHIBOX_BOOT_OK` を判定し自動電源オフ）→ 6. `output/` へ書き出し
 
-- 2回目以降はツリーを再利用し差分のみ（数分）
-- Windows 側の編集を取り込む: `SYNC=1` を先頭に付けて実行（`--size-only` 高速同期）
-- ツリー作り直し: `wsl -d Ubuntu-22.04 -u root -e bash "/mnt/c/.../scripts/reextract.sh"`
-- 途中経過: 別窓から `Get-Content build.log -Tail 30 -Wait`
+- 2回目以降はツリーを再利用し差分のみ
+- リポジトリ側の編集を取り込む: `SYNC=1 bash scripts/build-and-boot.sh`（`--size-only` 高速同期）
+- ツリー作り直し: `bash scripts/reextract.sh`
+- 途中経過: 別窓から `tail -f output/build.log`
 
 ## 起動方法
 
-**画面付き（GUI ウィンドウ）** — WSLg 経由で Windows デスクトップに表示:
+**画面付き（GUI ウィンドウ）** — WSL は WSLg 経由、macOS はネイティブ QEMU ウィンドウ:
 
-```powershell
-wsl -d Ubuntu-22.04 -u root -e bash "/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/scripts/boot-gui.sh"
+```bash
+bash scripts/boot-gui.sh
 ```
 
 **シリアルコンソール（対話・-nographic）**:
 
-```powershell
-wsl -d Ubuntu-22.04 -u root -e bash "/mnt/c/Users/Sentaro Takenaka/Documents/GitHub/zhibox-os/scripts/boot-qemu.sh"
+```bash
+bash scripts/boot-qemu.sh
 ```
 
 - どちらも `/` に着地し busybox シェルが待機（`Linux (none) 5.10.0 ...`）
 - 終了: 画面の `poweroff -f`、または `Ctrl+A` → `X`（nographic 時）
+- macOS は TCG のため起動に数分かかる（スクリプトは最大300秒待つ）
 
 ## 運用上の注意
 
@@ -85,14 +112,15 @@ mirror  = https://github.com/openeuler-mirror/kernel.git # 実際に取得した
 
 gitee が安定するまでは `git --git-dir=kernel.git --work-tree=kernel fetch --depth 1 mirror OLK-5.10` 推奨。
 
-### 2. NTFS の大文字小文字非区別による 13 ファイルの欠落
+### 2. 大文字小文字非区別ファイルシステムによる 13 ファイルの欠落 (NTFS / APFS 共通)
 
 カーネルには `xt_CONNMARK.h` / `xt_connmark.h` のような**大文字小文字だけ違う組が13組（26ファイル）**あり、
-Windows の NTFS は非区別のため **`kernel/` には片方しか存在できない**（この環境では区別ディレクトリ化も無効だった）。
+Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/` には片方しか存在できない**（この環境では区別ディレクトリ化も無効だった）。
 
 - `kernel/` は**参照用**（13ファイル欠落）。`git status` が怒らないよう元のリポジトリ側で `skip-worktree` 設定済み
 - **完全な26ファイルは `kernel.git/` のオブジェクトに保存されており**、ビルドはそこから展開するためビルド結果には影響しない
-- 完全なツリーの実体: WSL の `/root/kernel-src`（ケースセンシティブな ext4）
+- 完全なツリーの実体: WSL は `~/kernel-src`（ext4）、macOS は `/Volumes/zhibox-kernel/src`
+  （ケースセンシティブ APFS スパースバンドル。スクリプトが初回に自動作成・マウント）
 
 ### 3. コミット / push について
 
@@ -103,18 +131,21 @@ Windows の NTFS は非区別のため **`kernel/` には片方しか存在で�
 
 ### 4. ソースを変更する場合
 
-- ビルドするなら WSL 側 `/root/kernel-src` で編集するのが確実
-- Windows 側 `kernel/` で編集した場合: `SYNC=1` 付きでビルドスクリプトを再実行すると取り込む
+- ビルドするならビルド用ツリー側で編集するのが確実
+  （WSL: `~/kernel-src`、macOS: `/Volumes/zhibox-kernel/src`）
+- リポジトリ側 `kernel/` で編集した場合: `SYNC=1` 付きでビルドスクリプトを再実行すると取り込む
 
 ## スクリプト一覧
 
 | ファイル | 用途 |
 |---|---|
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
-| `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSLg） |
+| `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
+| `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
+| `scripts/build-initramfs.sh` | busybox initramfs を生成 |
 | `scripts/reextract.sh` | ビルド用ツリーを git から丸ごと作り直す |
 | `scripts/k.sh` | kernel クローン用 git ラッパー（`--git-dir`/`--work-tree` 自動付与） |
 | `scripts/case-collision-report.sh` | 大文字小文字衝突ファイルの列挙 |
-| `scripts/fix-missing-files.sh` | 欠落ファイルの復元（NTFS 制約が効かない場合の最終手段） |
+| `scripts/fix-missing-files.sh` | 欠落ファイルの復元（非区別FS制約が効かない場合の最終手段） |
 | `scripts/wsl-case-test.sh` | NTFS 区別フラグの動作検証 |

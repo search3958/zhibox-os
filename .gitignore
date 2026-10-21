@@ -2,3 +2,6 @@
 # (カーネルのソース kernel/ と履歴 kernel.git/ は含める — ローカルコミット用)
 /output/
 /build.log
+
+# macOS
+.DS_Store

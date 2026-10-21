@@ -57,6 +57,9 @@ brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils
 - ホストツール用に `scripts/host-include/darwin/` の `elf.h` / `byteswap.h` / `endian.h` を
   差し込むほか、新しめの GCC/binutils 向けの小さなソース修正をスクリプト内で自動適用する
   （すべて冪等。詳細は `scripts/build-and-boot.sh` の macOS ブロック）
+- initramfs の `gradient`（フレームバッファ描画デモ）も macOS で生成できる。Linux 用の
+  静的 libc が無いため、`scripts/linux-shim/`（syscall 直叩きの最小 libc 代替）と
+  `x86_64-elf-gcc` で freestanding な静的 ELF としてクロスビルドする（追加依存なし）
 - QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
 ## ビルド + 起動確認（1コマンド）
@@ -143,7 +146,8 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
-| `scripts/build-initramfs.sh` | busybox initramfs を生成 |
+| `scripts/build-initramfs.sh` | busybox + gradient の initramfs を生成 |
+| `scripts/linux-shim/` | macOS で gradient を静的 Linux ELF にする最小 libc 代替 |
 | `scripts/reextract.sh` | ビルド用ツリーを git から丸ごと作り直す |
 | `scripts/k.sh` | kernel クローン用 git ラッパー（`--git-dir`/`--work-tree` 自動付与） |
 | `scripts/case-collision-report.sh` | 大文字小文字衝突ファイルの列挙 |

@@ -5,6 +5,7 @@
 #
 #   WSL : busybox-static パッケージの /bin/busybox を使用
 #   macOS: 公式の x86_64 静的 busybox バイナリをダウンロードしキャッシュ
+#   gradient (fb-gradient.c) は両方で同梱する (macOS は linux-shim でクロスビルド)
 #
 set -euo pipefail
 
@@ -26,7 +27,32 @@ if [ "$OS" = macos ]; then
     mv "$BUSYBOX_CACHE.part" "$BUSYBOX_CACHE"
   fi
   cp "$BUSYBOX_CACHE" "$INITRAMFS/bin/busybox"
-  # gradient (フレームバウンド描画デモ) は静的 Linux バイナリが無いため macOS では同梱しない
+
+  # gradient (フレームバッファ描画デモ): macOS には Linux 用の静的 libc が無いので、
+  # syscall を直接発行する freestanding 版として x86_64-elf-gcc でクロスビルドする
+  # (scripts/linux-shim/ が最小限の libc 代替。glibc には依存しない)
+  XGCC="${CROSS_COMPILE:-x86_64-elf-}gcc"
+  if command -v "$XGCC" >/dev/null 2>&1; then
+    say "gradient をクロスビルド ($($XGCC -dumpversion))"
+    SHIM="$REPO_ROOT/scripts/linux-shim"
+    BUILD_GRADIENT="$OUT/build/gradient"
+    rm -rf "$BUILD_GRADIENT"
+    mkdir -p "$BUILD_GRADIENT"
+    GRADIENT_CFLAGS=(-nostdinc -isystem "$("$XGCC" -print-file-name=include)"
+      -I "$SHIM/include" -ffreestanding -fno-builtin -fno-stack-protector
+      -fno-pic -O2 -Wall -Wextra -Werror)
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$SHIM/mini.c" \
+      -o "$BUILD_GRADIENT/mini.o"
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$SHIM/start.S" \
+      -o "$BUILD_GRADIENT/start.o"
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/fb-gradient.c" \
+      -o "$BUILD_GRADIENT/fb-gradient.o"
+    "$XGCC" -nostdlib -static -no-pie -Wl,-e,_start \
+      -o "$INITRAMFS/bin/gradient" "$BUILD_GRADIENT"/*.o
+    chmod 0755 "$INITRAMFS/bin/gradient"
+  else
+    echo "    [warn] $XGCC が無いため gradient は同梱しません"
+  fi
 else
   # ------------------------------------------------------------- WSL / Linux
   [ -x /bin/busybox ] || fail "/bin/busybox がありません: apt install busybox-static"

@@ -30,11 +30,11 @@ if [ "$OS" = macos ]; then
 
   # gradient (フレームバッファ描画デモ): macOS には Linux 用の静的 libc が無いので、
   # syscall を直接発行する freestanding 版として x86_64-elf-gcc でクロスビルドする
-  # (scripts/linux-shim/ が最小限の libc 代替。glibc には依存しない)
+  # (scripts/host/darwin/linux-shim/ が最小限の libc 代替。glibc には依存しない)
   XGCC="${CROSS_COMPILE:-x86_64-elf-}gcc"
   if command -v "$XGCC" >/dev/null 2>&1; then
     say "gradient をクロスビルド ($($XGCC -dumpversion))"
-    SHIM="$REPO_ROOT/scripts/linux-shim"
+    SHIM="$REPO_ROOT/scripts/host/darwin/linux-shim"
     BUILD_GRADIENT="$OUT/build/gradient"
     rm -rf "$BUILD_GRADIENT"
     mkdir -p "$BUILD_GRADIENT"
@@ -45,7 +45,7 @@ if [ "$OS" = macos ]; then
       -o "$BUILD_GRADIENT/mini.o"
     "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$SHIM/start.S" \
       -o "$BUILD_GRADIENT/start.o"
-    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/fb-gradient.c" \
+    "$XGCC" "${GRADIENT_CFLAGS[@]}" -c "$REPO_ROOT/scripts/guest/fb-gradient.c" \
       -o "$BUILD_GRADIENT/fb-gradient.o"
     "$XGCC" -nostdlib -static -no-pie -Wl,-e,_start \
       -o "$INITRAMFS/bin/gradient" "$BUILD_GRADIENT"/*.o
@@ -58,10 +58,10 @@ else
   [ -x /bin/busybox ] || fail "/bin/busybox がありません: apt install busybox-static"
   cp /bin/busybox "$INITRAMFS/bin/busybox"
   gcc -static -O2 -Wall -Wextra -Werror \
-    -o "$INITRAMFS/bin/gradient" "$REPO_ROOT/scripts/fb-gradient.c"
+    -o "$INITRAMFS/bin/gradient" "$REPO_ROOT/scripts/guest/fb-gradient.c"
 fi
 
-cp "$REPO_ROOT/scripts/initramfs-init.sh" "$INITRAMFS/init"
+cp "$REPO_ROOT/scripts/guest/init" "$INITRAMFS/init"
 chmod 0755 "$INITRAMFS/init"
 ( cd "$INITRAMFS" && find . | cpio -o -H newc --quiet | gzip -9 ) > "$INITRD"
 ls -lh "$INITRD"

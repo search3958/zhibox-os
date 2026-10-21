@@ -29,8 +29,8 @@ git --git-dir=kernel.git --work-tree=kernel diff
 ```
 ```bash
 # WSL 内ならラッパーで自動付与
-bash scripts/k.sh status
-bash scripts/k.sh log --oneline -5
+bash scripts/tools/k.sh status
+bash scripts/tools/k.sh log --oneline -5
 ```
 
 ## 必要な環境
@@ -54,11 +54,11 @@ brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils
 - APFS は大文字小文字を区別しないため、**ケースセンシティブ APFS のスパースバンドル**
   (`~/zhibox-kernel.sparsebundle` → `/Volumes/zhibox-kernel`) を初回に自動作成し、
   その中の `/Volumes/zhibox-kernel/src` でビルドする（sudo 不要・使用分だけ拡張）
-- ホストツール用に `scripts/host-include/darwin/` の `elf.h` / `byteswap.h` / `endian.h` を
+- ホストツール用に `scripts/host/darwin/` の `elf.h` / `byteswap.h` / `endian.h` を
   差し込むほか、新しめの GCC/binutils 向けの小さなソース修正をスクリプト内で自動適用する
   （すべて冪等。詳細は `scripts/build-and-boot.sh` の macOS ブロック）
 - initramfs の `gradient`（フレームバッファ描画デモ）も macOS で生成できる。Linux 用の
-  静的 libc が無いため、`scripts/linux-shim/`（syscall 直叩きの最小 libc 代替）と
+  静的 libc が無いため、`scripts/host/darwin/linux-shim/`（syscall 直叩きの最小 libc 代替）と
   `x86_64-elf-gcc` で freestanding な静的 ELF としてクロスビルドする（追加依存なし）
 - QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
@@ -80,7 +80,7 @@ wsl -d Ubuntu-22.04 -u root -e bash /mnt/c/.../zhibox-os/scripts/build-and-boot.
 
 - 2回目以降はツリーを再利用し差分のみ
 - リポジトリ側の編集を取り込む: `SYNC=1 bash scripts/build-and-boot.sh`（`--size-only` 高速同期）
-- ツリー作り直し: `bash scripts/reextract.sh`
+- ツリー作り直し: `bash scripts/host/wsl/reextract.sh`
 - 途中経過: 別窓から `tail -f output/build.log`
 
 ## 起動方法
@@ -140,16 +140,16 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 
 ## スクリプト一覧
 
-| ファイル | 用途 |
+| パス | 用途 |
 |---|---|
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
-| `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
-| `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
-| `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
 | `scripts/build-initramfs.sh` | busybox + gradient の initramfs を生成 |
-| `scripts/linux-shim/` | macOS で gradient を静的 Linux ELF にする最小 libc 代替 |
-| `scripts/reextract.sh` | ビルド用ツリーを git から丸ごと作り直す |
-| `scripts/k.sh` | kernel クローン用 git ラッパー（`--git-dir`/`--work-tree` 自動付与） |
-| `scripts/case-collision-report.sh` | 大文字小文字衝突ファイルの列挙 |
-| `scripts/fix-missing-files.sh` | 欠落ファイルの復元（非区別FS制約が効かない場合の最終手段） |
-| `scripts/wsl-case-test.sh` | NTFS 区別フラグの動作検証 |
+| `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
+| `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
+| `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
+| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` |
+| `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
+| `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助スクリプト |
+| `scripts/tools/` | ホスト共通ツール: `k.sh` / `case-collision-report.sh` |
+
+> ディレクトリ構成の詳細と、新しいスクリプトを置く場所は `scripts/README.md` を参照。

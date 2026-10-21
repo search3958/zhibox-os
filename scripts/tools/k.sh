@@ -3,11 +3,11 @@
 #   履歴 (kernel.git/) とソース (kernel/) を分離しているため、git 操作は
 #   必ず --git-dir と --work-tree を同時に指定する必要がある。それを自動付与する。
 #
-#   使い方:  bash scripts/k.sh status
-#            bash scripts/k.sh log --oneline -5
-#            bash scripts/k.sh diff
+#   使い方:  bash scripts/tools/k.sh status
+#            bash scripts/tools/k.sh log --oneline -5
+#            bash scripts/tools/k.sh diff
 #
-ROOT="${ZHIBOX_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+ROOT="${ZHIBOX_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 if [ -d "$ROOT/kernel/.git" ]; then
   exec git -C "$ROOT/kernel" "$@"
 fi

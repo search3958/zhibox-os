@@ -40,7 +40,7 @@ if [ "$OS" = macos ]; then
   # ホストツール (modpost, relocs, selinux genheaders 等) は macOS に
   # elf.h / byteswap.h / endian.h / arch の uapi ヘッダが無いため差し込む
   # ($(srctree)/$(objtree) は make 側で展開される)
-  HOSTCFLAGS_SHIM="-I$REPO_ROOT/scripts/host-include/darwin -I\$(srctree)/arch/x86/include/uapi -I\$(objtree)/arch/x86/include/generated/uapi"
+  HOSTCFLAGS_SHIM="-I$REPO_ROOT/scripts/host/darwin -I\$(srctree)/arch/x86/include/uapi -I\$(objtree)/arch/x86/include/generated/uapi"
   # 新 GCC 向け警告降格フラグ (ターゲットコードのみ)
   TARGET_KCFLAGS="$(zh_gcc_compat_flags "$CROSS_GCC")"
 else

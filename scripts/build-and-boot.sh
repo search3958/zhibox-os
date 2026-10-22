@@ -205,5 +205,13 @@ ls -lh "$OUT"
 echo
 echo "===== 完了 ====="
 echo "bzImage : $OUT/bzImage"
+if [ ! -f "$OUT/rootfs.img" ]; then
+  echo "HTML+CSS (ゲスト WebKitGTK) を使うには、先に rootfs を作成:"
+  if [ "$OS" = macos ]; then
+    echo "  bash scripts/build-rootfs.sh        # QEMU ゲスト内で apt"
+  else
+    echo "  sudo bash scripts/build-rootfs.sh  # debootstrap"
+  fi
+fi
 echo "起動確認: bash scripts/boot-qemu.sh        (画面付き)"
 echo "          SERIAL=1 bash scripts/boot-qemu.sh (シリアルコンソール)"

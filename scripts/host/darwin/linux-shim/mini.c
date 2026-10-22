@@ -64,12 +64,27 @@ ssize_t write(int fd, const void *buf, size_t count)
 
 int open(const char *path, int flags, ...)
 {
-	return (int)checked(zh_syscall(ZH_SYS_open, (long)path, flags, 0));
+	__builtin_va_list ap;
+	int mode = 0;
+
+	if (flags & O_CREAT) {
+		__builtin_va_start(ap, flags);
+		mode = __builtin_va_arg(ap, int);
+		__builtin_va_end(ap);
+	}
+	return (int)checked(zh_syscall6(ZH_SYS_open, (long)path, flags,
+					 mode, 0, 0, 0));
 }
 
 int close(int fd)
 {
 	return (int)checked(zh_syscall(ZH_SYS_close, fd, 0, 0));
+}
+
+int rename(const char *oldpath, const char *newpath)
+{
+	return (int)checked(zh_syscall(ZH_SYS_rename, (long)oldpath,
+				       (long)newpath, 0));
 }
 
 off_t lseek(int fd, off_t offset, int whence)

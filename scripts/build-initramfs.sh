@@ -23,18 +23,13 @@ cp "$REPO_ROOT/scripts/guest/HarmonyOS_Sans_SC_Regular.ttf" \
 cp "$REPO_ROOT/scripts/guest/wallpaper.png" \
    "$INITRAMFS/usr/share/zhibox/wallpaper.png"
 
-# HTML+CSS (WebKit) を raw RGBA にレンダリングして同梱する。
-#   ZH_HTML_RENDER=0 でスキップ、ZH_HTML_RAW=path で既存ファイルを使う。
-#   レンダリングに失敗しても framebuffer デモ自体は動くよう、警告のみで続行する。
+# HTML+CSS はゲスト Linux の WebKitGTK が起動時に描画する (scripts/guest/web/)。
+# initramfs には HTML も raw も同梱しない。rootfs.img が無い場合や描画に失敗した
+# 場合は、fb-gradient がプレースホルダーを表示する。
+# デバッグ用に既存の raw を明示的に埋め込みたい場合だけ ZH_HTML_RAW を指定できる。
 if [ -n "${ZH_HTML_RAW:-}" ] && [ -f "${ZH_HTML_RAW}" ]; then
   cp "$ZH_HTML_RAW" "$INITRAMFS/usr/share/zhibox/html.raw"
-  say "HTML raw を同梱 (${ZH_HTML_RAW})"
-elif [ "${ZH_HTML_RENDER:-1}" != 0 ]; then
-  if bash "$REPO_ROOT/scripts/render-html.sh" "$OUT/html.raw"; then
-    cp "$OUT/html.raw" "$INITRAMFS/usr/share/zhibox/html.raw"
-  else
-    echo "    [warn] HTML レンダリングをスキップ (WEBKIT ウィンドウはプレースホルダー)"
-  fi
+  say "HTML raw をデバッグ用に同梱 (${ZH_HTML_RAW})"
 fi
 
 if [ "$OS" = macos ]; then

@@ -43,6 +43,7 @@ static inline long zh_syscall6(long nr, long a1, long a2, long a3,
 #define ZH_SYS_ioctl		16
 #define ZH_SYS_nanosleep	35
 #define ZH_SYS_exit		60
+#define ZH_SYS_rename		82
 
 static inline long zh_syscall(long nr, long a1, long a2, long a3)
 {
@@ -59,6 +60,7 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int open(const char *path, int flags, ...);
 int close(int fd);
+int rename(const char *oldpath, const char *newpath);
 off_t lseek(int fd, off_t offset, int whence);
 int ioctl(int fd, unsigned long request, ...);
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
@@ -89,6 +91,9 @@ int memcmp(const void *a, const void *b, size_t n);
 /* ------------------------------------------------------------ fcntl */
 #define O_RDWR		02
 #define O_NOCTTY	0400
+#define O_WRONLY	01
+#define O_CREAT		0100
+#define O_TRUNC		01000
 
 /* ------------------------------------------------------------ mman */
 #define PROT_READ	0x1

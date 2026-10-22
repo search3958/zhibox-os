@@ -7,28 +7,29 @@
 scripts/
 ├── build-and-boot.sh      # エントリ: ビルド → initramfs → 起動確認
 ├── build-initramfs.sh     # エントリ: initramfs 生成
-├── render-html.sh         # エントリ: HTML+CSS → raw RGBA (WebKit, JS 無効)
+├── build-rootfs.sh        # エントリ: ゲスト WebKitGTK 用 rootfs.img 生成 (Linux/WSL / macOS 分岐)
+├── build-rootfs-guest.sh  #   macOS: Ubuntu base + QEMU ゲスト内 apt で rootfs.img 生成
 ├── boot-qemu.sh           # エントリ: シリアル起動
 ├── boot-gui.sh            # エントリ: GUI 起動
 ├── lib/
 │   └── common.sh          # 共通 bash (OS 判定・パス・ツール検出)
 ├── guest/                 # ゲスト (Linux) 側で動くもの
-│   ├── init               #   PID 1 (busybox sh)
-│   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ)
+│   ├── init               #   PID 1 (busybox sh, rootfs マウント / live renderer 管理)
+│   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ + hover 入力)
 │   ├── zh_font.c/.h       #   TrueType パーサ / ラスタライザ (自前実装)
 │   ├── zh_png.c/.h        #   PNG デコーダ / inflate (自前実装)
-│   ├── web/index.html     #   WebKit で描画する HTML+CSS (JS なし)
+│   ├── web/index.html     #   ゲスト WebKitGTK で描画する HTML+CSS (JS なし)
+│   ├── web/render-html.py #   ゲスト内で WebKitGTK スナップショット → raw RGBA (live hover 対応)
+│   ├── web/launch.sh      #   ゲスト内で Xvfb + dbus + WebKitGTK を起動 (live フラグ)
 │   ├── HarmonyOS_Sans_SC_Regular.ttf  # UI フォント (initramfs へ同梱)
 │   └── wallpaper.png      #   壁紙 (initramfs へ同梱)
 ├── host/                  # ホスト OS に依存するもの
 │   ├── darwin/            #   macOS 専用
-│   │   ├── render-html.swift  # WKWebView で HTML → raw RGBA
 │   │   ├── elf.h          #     ホストツール用ヘッダ
 │   │   ├── byteswap.h
 │   │   ├── endian.h
 │   │   └── linux-shim/    #     静的 Linux ELF を作る最小 libc
 │   └── wsl/               #   WSL / Windows 専用
-│       ├── render-html.py #     WebKitGTK で HTML → raw RGBA
 │       ├── aux-scan.sh
 │       ├── fix-missing-files.sh
 │       ├── lfs-scan.sh

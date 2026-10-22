@@ -85,6 +85,14 @@ body::before {
   font-size: 17px;
   color: #03131a;
   letter-spacing: -0.5px;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.logo:hover {
+  transform: rotate(-9deg) scale(1.10);
+  box-shadow: 0 12px 32px rgba(45, 212, 191, 0.55),
+              0 0 0 3px rgba(94, 234, 212, 0.16),
+              inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .brand h1 {
@@ -116,6 +124,15 @@ body::before {
   background: rgba(15, 23, 42, 0.65);
   padding: 5px 8px;
   border-radius: 999px;
+  transition: color 160ms ease, border-color 160ms ease,
+              background 160ms ease, transform 160ms ease;
+}
+
+.pill:hover {
+  color: #ffffff;
+  border-color: rgba(94, 234, 212, 0.72);
+  background: rgba(45, 212, 191, 0.16);
+  transform: translateY(-1px);
 }
 
 .pill.ok {
@@ -183,6 +200,14 @@ body::before {
   border-radius: 6px;
   padding: 4px 8px;
   letter-spacing: 0.3px;
+  transition: color 160ms ease, border-color 160ms ease,
+              background 160ms ease;
+}
+
+.addr:hover {
+  color: #ecfeff;
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(14, 34, 54, 0.82);
 }
 
 .titlebar .hint {
@@ -216,6 +241,12 @@ body::before {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  transition: letter-spacing 180ms ease, filter 180ms ease;
+}
+
+.hero h2:hover {
+  letter-spacing: 0.4px;
+  filter: drop-shadow(0 0 14px rgba(94, 234, 212, 0.35));
 }
 
 .hero p {
@@ -258,6 +289,27 @@ body::before {
   background: linear-gradient(180deg, rgba(30, 43, 68, 0.65),
               rgba(15, 23, 40, 0.55));
   min-width: 0;
+  transition: transform 170ms ease, border-color 170ms ease,
+              box-shadow 170ms ease, background 170ms ease;
+}
+
+.card:hover {
+  transform: translateY(-4px) scale(1.025);
+  border-color: rgba(94, 234, 212, 0.78);
+  background: linear-gradient(180deg, rgba(38, 67, 86, 0.95),
+              rgba(17, 34, 52, 0.92));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.42),
+              0 0 0 1px rgba(94, 234, 212, 0.14) inset,
+              0 0 24px rgba(45, 212, 191, 0.16);
+}
+
+.card:hover .v {
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(94, 234, 212, 0.55);
+}
+
+.card:hover .k {
+  color: #a7f3d0;
 }
 
 .card .k {
@@ -329,6 +381,12 @@ body::before {
   font-size: 9px;
   color: #a7f3d0;
   white-space: nowrap;
+  transition: color 160ms ease, text-shadow 160ms ease;
+}
+
+.meter .value:hover {
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(94, 234, 212, 0.65);
 }
 
 .footer {
@@ -364,7 +422,7 @@ body::before {
       </div>
     </div>
     <div class="pills">
-      <span class="pill ok">WebKit engine</span>
+      <span class="pill ok">WebKitGTK / guest</span>
       <span class="pill off">JS disabled</span>
       <span class="pill">raw RGBA</span>
     </div>
@@ -380,8 +438,8 @@ body::before {
       <div class="hero">
         <div>
           <h2>HTML + CSS,<br>no JavaScript.</h2>
-          <p>A WebKit-rendered surface delivered to the guest as raw RGBA
-             pixels. The window system moves it, the engine only paints it.</p>
+          <p>WebKitGTK runs inside this Linux guest, paints the page to raw
+             RGBA, and the framebuffer window system moves it.</p>
         </div>
         <div class="badge">
           <span class="big">RENDER OK</span>
@@ -391,7 +449,7 @@ body::before {
       </div>
 
       <div class="cards">
-        <div class="card accent"><div class="k">Engine</div><div class="v">WebKit</div><div class="n">GTK port / WKWebView</div></div>
+        <div class="card accent"><div class="k">Engine</div><div class="v">WebKitGTK</div><div class="n">guest Linux / Xvfb</div></div>
         <div class="card warn"><div class="k">Scripting</div><div class="v">OFF</div><div class="n">engine policy + CSP</div></div>
         <div class="card blue"><div class="k">Layout</div><div class="v">Grid</div><div class="n">flex &middot; gradients &middot; radius</div></div>
         <div class="card"><div class="k">Transport</div><div class="v">ZHRAW1</div><div class="n">no PNG in the pipeline</div></div>
@@ -400,11 +458,11 @@ body::before {
       <div class="meter">
         <span class="label">pipeline</span>
         <div class="bars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
-        <span class="value">snapshot &rarr; initramfs &rarr; /dev/fb0</span>
+        <span class="value">guest WebKitGTK &rarr; /tmp/html.raw &rarr; /dev/fb0</span>
       </div>
       <div class="footer">
-        <span><b>Window:</b> drag the title bar &middot; click to raise</span>
-        <span><b>Quit:</b> Q / Esc</span>
+        <span><b>Hover:</b> cards / pills / logo</span>
+        <span><b>Window:</b> drag &middot; <b>Quit:</b> Q / Esc</span>
       </div>
     </div>
   </section>

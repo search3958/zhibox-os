@@ -79,7 +79,11 @@ static int stacking[WINDOW_COUNT] = {0, 1, 2, 3};
 
 #define ZH_FONT_PATH		"/usr/share/zhibox/font.ttf"
 #define ZH_WALLPAPER_PATH	"/usr/share/zhibox/wallpaper.png"
-#define ZH_HTML_PATH		"/usr/share/zhibox/html.raw"
+#define ZH_HTML_PATH		"/tmp/html.raw"
+#define ZH_HTML_FALLBACK	"/usr/share/zhibox/html.raw"
+#define ZH_HTML_VERSION_PATH	"/tmp/html.version"
+#define ZH_HTML_INPUT_PATH	"/tmp/html.input"
+#define ZH_HTML_INPUT_TMP	"/tmp/.html.input.tmp"
 
 static struct zh_font ui_font;
 static int font_ready;
@@ -90,18 +94,23 @@ static uint8_t text_mask[128 * 128];
 
 /* ------------------------------------------------------------ HTML (WebKit)
  *
- * ホスト側で WebKit (WSL は WebKitGTK、macOS は WKWebView) が HTML+CSS を
- * レンダリングし、PNG を介さず raw RGBA として initramfs に同梱する。
- * ゲストはそれを読み、ウィンドウ本文サイズへバイリニア縮小してキャッシュする。
- * ドラッグのたびに 640x400 から縮小しないよう、起動時に一度だけ変換する。
+ * ゲスト Linux の init が rootfs.img をマウントして chroot し、Xvfb 上の
+ * WebKitGTK で HTML+CSS を raw RGBA に描画する。その結果を /tmp/html.raw
+ * から読み、ウィンドウ本文サイズへバイリニア縮小してキャッシュする。
+ * ドラッグのたびに 640x400 から縮小しないよう、フレーム更新時だけ変換する。
+ * ZH_HTML_FALLBACK はデバッグ用に明示的に埋め込んだ raw だけを読む。
  */
 struct html_surface {
+	uint8_t *data;
+	size_t data_size;
+	uint32_t version;
 	uint8_t *rgba;
 	int src_w;
 	int src_h;
 	int stride;
 	int raw_ok;
 	uint32_t *scaled;
+	size_t scaled_bytes;
 	int scaled_w;
 	int scaled_h;
 	int off_x;
@@ -109,6 +118,8 @@ struct html_surface {
 };
 
 static struct html_surface html_view;
+static int html_input_last_x = -100000;
+static int html_input_last_y = -100000;
 
 /* ------------------------------------------------------------ DRM 加速
  *
@@ -1025,6 +1036,12 @@ static uint8_t *alloc_buffer(size_t length)
 	return mapping;
 }
 
+static void release_buffer(void *mapping, size_t length)
+{
+	if (mapping)
+		munmap(mapping, length);
+}
+
 static void *read_file(const char *path, size_t *size_out)
 {
 	int fd;
@@ -1061,8 +1078,10 @@ static void *read_file(const char *path, size_t *size_out)
 	}
 	close(fd);
 
-	if (total != (size_t)size)
+	if (total != (size_t)size) {
+		release_buffer(data, (size_t)size);
 		return NULL;
+	}
 	*size_out = total;
 	return data;
 }
@@ -1111,9 +1130,11 @@ static int html_raw_load(void)
 	uint32_t stride;
 
 	if (!data)
+		data = read_file(ZH_HTML_FALLBACK, &size);
+	if (!data)
 		return -1;
 	if (size < 24 || memcmp(data, magic, sizeof(magic)) != 0)
-		return -1;
+		goto invalid;
 
 	width = raw_le32(data + 8);
 	height = raw_le32(data + 12);
@@ -1122,16 +1143,24 @@ static int html_raw_load(void)
 
 	if (format != 0 || width == 0 || height == 0 ||
 	    width > 8192 || height > 8192 || stride < width * 4)
-		return -1;
+		goto invalid;
 	if (size < 24 + (size_t)stride * height)
-		return -1;
+		goto invalid;
 
+	if (html_view.data)
+		release_buffer(html_view.data, html_view.data_size);
+	html_view.data = data;
+	html_view.data_size = size;
 	html_view.rgba = data + 24;
 	html_view.src_w = (int)width;
 	html_view.src_h = (int)height;
 	html_view.stride = (int)stride;
 	html_view.raw_ok = 1;
 	return 0;
+
+invalid:
+	release_buffer(data, size);
+	return -1;
 }
 
 static void prepare_html_cache(void)
@@ -1143,6 +1172,8 @@ static void prepare_html_cache(void)
 	int dh;
 	int x;
 	int y;
+	int old_w = 0;
+	int old_h = 0;
 	uint32_t *scaled;
 
 	if (!html_view.raw_ok)
@@ -1172,6 +1203,8 @@ static void prepare_html_cache(void)
 		printf("gradient: html cache allocation failed\n");
 		return;
 	}
+	old_w = html_view.scaled_w;
+	old_h = html_view.scaled_h;
 
 	/* 8.8 固定小数点のバイリニア補間 */
 	for (y = 0; y < dh; y++) {
@@ -1244,13 +1277,127 @@ static void prepare_html_cache(void)
 		}
 	}
 
+	if (html_view.scaled)
+		release_buffer(html_view.scaled, html_view.scaled_bytes);
 	html_view.scaled = scaled;
+	html_view.scaled_bytes = (size_t)dw * dh * sizeof(*scaled);
 	html_view.scaled_w = dw;
 	html_view.scaled_h = dh;
 	html_view.off_x = (max_w - dw) / 2;
 	html_view.off_y = (max_h - dh) / 2;
-	printf("gradient: html %dx%d -> %dx%d (raw RGBA)\n",
-	       html_view.src_w, html_view.src_h, dw, dh);
+	if (old_w != dw || old_h != dh)
+		printf("gradient: html %dx%d -> %dx%d (raw RGBA)\n",
+		       html_view.src_w, html_view.src_h, dw, dh);
+}
+
+/* レンダラが書く 4 バイトのフレーム番号。raw の再読み込み判定だけに使う。 */
+static uint32_t html_version_read(void)
+{
+	uint32_t version = html_view.version;
+	size_t size = 0;
+	uint8_t *data = read_file(ZH_HTML_VERSION_PATH, &size);
+
+	if (data) {
+		if (size >= 4)
+			version = raw_le32(data);
+		release_buffer(data, size);
+	}
+	return version;
+}
+
+static void html_refresh(void)
+{
+	uint32_t version = html_version_read();
+
+	if (version == html_view.version)
+		return;
+
+	if (html_raw_load() == 0) {
+		html_view.version = version;
+		prepare_html_cache();
+		scene_dirty = 1;
+		printf("gradient: html frame %u\n", version);
+	} else {
+		/* 壊れたフレームで毎回リトライしないよう、番号だけ進める。 */
+		html_view.version = version;
+	}
+}
+
+/*
+ * fb-gradient 側のマウス位置を WebKit の 640x400 座標へ変換し、
+ * /tmp/html.input に書く。ゲスト側の render-html.py が XTEST で
+ * ポインタを動かし、CSS :hover を発火させる。
+ */
+static char *append_int(char *out, int value)
+{
+	char digits[12];
+	unsigned int number;
+	int count = 0;
+
+	if (value < 0) {
+		*out++ = '-';
+		number = (unsigned int)(-value);
+	} else {
+		number = (unsigned int)value;
+	}
+	do {
+		digits[count++] = (char)('0' + number % 10);
+		number /= 10;
+	} while (number);
+	while (count)
+		*out++ = digits[--count];
+	return out;
+}
+
+static void html_input_write(int x, int y)
+{
+	char buffer[32];
+	char *end = buffer;
+	int fd;
+
+	if (x == html_input_last_x && y == html_input_last_y)
+		return;
+	html_input_last_x = x;
+	html_input_last_y = y;
+
+	fd = open(ZH_HTML_INPUT_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0)
+		return;
+	end = append_int(end, x);
+	*end++ = ' ';
+	end = append_int(end, y);
+	*end++ = '\n';
+	(void)write(fd, buffer, (size_t)(end - buffer));
+	close(fd);
+	(void)rename(ZH_HTML_INPUT_TMP, ZH_HTML_INPUT_PATH);
+}
+
+static void html_input_update(void)
+{
+	const struct window *window = &windows[HTML_INDEX];
+	int left = window->x + 2 * BORDER + 6 + html_view.off_x;
+	int top = window->y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
+	int x = -1;
+	int y = -1;
+
+	if (html_view.scaled && html_view.scaled_w > 0 &&
+	    html_view.scaled_h > 0 &&
+	    window_at(mouse_x, mouse_y) == HTML_INDEX &&
+	    mouse_x >= left && mouse_x < left + html_view.scaled_w &&
+	    mouse_y >= top && mouse_y < top + html_view.scaled_h) {
+		x = (mouse_x - left) * html_view.src_w / html_view.scaled_w;
+		y = (mouse_y - top) * html_view.src_h / html_view.scaled_h;
+		if (x < 0)
+			x = 0;
+		if (y < 0)
+			y = 0;
+		if (x >= html_view.src_w)
+			x = html_view.src_w - 1;
+		if (y >= html_view.src_h)
+			y = html_view.src_h - 1;
+	}
+
+	html_input_write(x, y);
 }
 
 
@@ -1449,6 +1596,7 @@ int main(void)
 	struct timespec tick;
 	int tty;
 	int mouse_retries = 0;
+	int html_poll = 0;
 
 	fb = open_framebuffer();
 	if (!fb)
@@ -1469,6 +1617,7 @@ int main(void)
 		       html_view.src_w, html_view.src_h);
 	else
 		printf("gradient: html render unavailable (placeholder)\n");
+	html_view.version = html_version_read();
 
 	tty = open("/dev/tty0", O_RDWR);
 	if (tty < 0)
@@ -1501,6 +1650,7 @@ int main(void)
 
 	layout_windows();
 	prepare_html_cache();
+	html_input_update();
 	build_background();
 	build_scene();
 	blit_full();
@@ -1528,6 +1678,11 @@ int main(void)
 			break;
 
 		changed = handle_mouse();
+		html_input_update();
+		if (++html_poll >= 10) {
+			html_poll = 0;
+			html_refresh();
+		}
 		if (changed || scene_dirty) {
 			cursor_hide();
 			if (scene_dirty) {

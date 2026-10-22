@@ -20,18 +20,42 @@ KERNEL="${2:-$OUT/bzImage}"
 
 QEMU="$(command -v qemu-system-x86_64)" || { echo "qemu-system-x86_64 がありません"; exit 1; }
 
+# ゲスト Linux 内で WebKitGTK を動かす rootfs。
+# ビルド方法: WSL/Linux は sudo bash scripts/build-rootfs.sh
+#             macOS は bash scripts/build-rootfs.sh (QEMU ゲスト内で apt)
+ROOTFS="${ZH_ROOTFS:-$OUT/rootfs.img}"
+MEM="${ZH_QEMU_MEM:-1G}"
+DISK_ARGS=()
+HTML_APPEND=""
+if [ -f "$ROOTFS" ]; then
+  MEM="${ZH_QEMU_MEM:-2G}"
+  DISK_ARGS=(-drive "file=$ROOTFS,format=raw,if=ide,index=0")
+  HTML_APPEND=" zh_html_root=1"
+  echo "rootfs: $ROOTFS (IDE /dev/sda, guest WebKitGTK)"
+else
+  echo "rootfs: なし (WEBKIT はプレースホルダー)"
+  if [ "$OS" = macos ]; then
+    echo "        bash scripts/build-rootfs.sh で作成できます"
+  else
+    echo "        sudo bash scripts/build-rootfs.sh で作成できます"
+  fi
+fi
+
 ARGS=(
-  -machine pc -m 1G -smp 2
+  -machine pc -m "$MEM" -smp 2
   -kernel "$KERNEL"
   -initrd "$INITRD"
   -vga virtio
 )
+if [ "${#DISK_ARGS[@]}" -gt 0 ]; then
+  ARGS+=("${DISK_ARGS[@]}")
+fi
 
 if [ -n "${SERIAL:-}" ]; then
   # シリアルコンソール (対話)
   echo "QEMU (シリアルコンソール) 起動中 … 終了: Ctrl+A → X"
   exec "$QEMU" "${ARGS[@]}" \
-    -append "console=ttyS0 rdinit=/init loglevel=6" \
+    -append "console=ttyS0 rdinit=/init loglevel=6$HTML_APPEND" \
     -nographic -monitor none
 fi
 
@@ -40,7 +64,7 @@ if [ "$OS" = macos ]; then
   echo "QEMU (GUI) 起動中 … Cocoa ウィンドウが開きます"
   echo "  終了方法: 画面のシェルで poweroff -f ／ ウィンドウを閉じる (Ctrl+C)"
   exec "$QEMU" "${ARGS[@]}" \
-    -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1" \
+    -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1$HTML_APPEND" \
     -display cocoa
 fi
 
@@ -54,7 +78,7 @@ echo "  終了方法: 画面のシェルで poweroff -f ／ ウィンドウを�
 
 GUI_ARGS=(
   "${ARGS[@]}"
-  -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1"
+  -append "console=tty0 rdinit=/init loglevel=6 zh_gui=1$HTML_APPEND"
 )
 
 if "$QEMU" "${GUI_ARGS[@]}" -display gtk; then

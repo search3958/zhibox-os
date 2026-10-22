@@ -4,6 +4,145 @@ mount -t proc     proc     /proc  2>/dev/null
 mount -t sysfs    sysfs    /sys   2>/dev/null
 mount -t devtmpfs devtmpfs /dev   2>/dev/null
 mount -t tmpfs    tmpfs    /tmp   2>/dev/null
+
+# ---------------------------------------------------------------- HTML (guest WebKitGTK)
+# QEMU の IDE ディスクとして渡された rootfs.img を読み取り専用でマウントし、
+# chroot 内で Xvfb + WebKitGTK を実行する。GUI 起動時はレンダラを常駐させ、
+# fb-gradient が /tmp/html.input に書くポインタ位置を XTEST で WebKit に送る。
+# これにより CSS :hover がリアルタイムに反映される。
+GUEST_ROOT=/mnt/root
+GUEST_PID=""
+GUEST_MOUNTED=0
+
+guest_mount() {
+	[ "$GUEST_MOUNTED" = 1 ] && return 0
+
+	for dev in /dev/sda /dev/sda1 /dev/sdb /dev/sdb1 /dev/vda /dev/vda1; do
+		[ -b "$dev" ] || continue
+
+		mkdir -p "$GUEST_ROOT"
+		if ! mount -t ext4 -o ro "$dev" "$GUEST_ROOT" 2>/dev/null; then
+			continue
+		fi
+		if [ ! -x "$GUEST_ROOT/opt/zhibox/launch.sh" ]; then
+			umount "$GUEST_ROOT" 2>/dev/null
+			continue
+		fi
+
+		echo "guest html: rootfs $dev"
+		mkdir -p "$GUEST_ROOT/proc" "$GUEST_ROOT/sys" \
+			 "$GUEST_ROOT/dev" "$GUEST_ROOT/tmp" \
+			 "$GUEST_ROOT/run" "$GUEST_ROOT/out" \
+			 "$GUEST_ROOT/dev/pts" "$GUEST_ROOT/dev/shm" \
+			 2>/dev/null
+		mount -t proc  proc  "$GUEST_ROOT/proc" 2>/dev/null
+		mount -t sysfs sysfs "$GUEST_ROOT/sys"  2>/dev/null
+		mount -o bind /dev "$GUEST_ROOT/dev" 2>/dev/null
+		mount -t devpts devpts "$GUEST_ROOT/dev/pts" 2>/dev/null
+		mount -t tmpfs tmpfs "$GUEST_ROOT/dev/shm" 2>/dev/null
+		mount -t tmpfs tmpfs "$GUEST_ROOT/tmp" 2>/dev/null
+		mount -t tmpfs tmpfs "$GUEST_ROOT/run" 2>/dev/null
+		chmod 1777 "$GUEST_ROOT/tmp" "$GUEST_ROOT/dev/shm" 2>/dev/null
+		mount -o bind /tmp "$GUEST_ROOT/out" 2>/dev/null
+
+		GUEST_MOUNTED=1
+		return 0
+	done
+
+	return 1
+}
+
+guest_umount() {
+	[ "$GUEST_MOUNTED" = 1 ] || return 0
+
+	umount "$GUEST_ROOT/out" 2>/dev/null
+	umount "$GUEST_ROOT/dev/shm" 2>/dev/null
+	umount "$GUEST_ROOT/dev/pts" 2>/dev/null
+	umount "$GUEST_ROOT/dev" 2>/dev/null
+	umount "$GUEST_ROOT/proc" 2>/dev/null
+	umount "$GUEST_ROOT/sys" 2>/dev/null
+	umount "$GUEST_ROOT/tmp" 2>/dev/null
+	umount "$GUEST_ROOT/run" 2>/dev/null
+	umount "$GUEST_ROOT" 2>/dev/null
+	GUEST_MOUNTED=0
+}
+
+# シリアル検証用: 1 枚描画して終了する。
+render_guest_html() {
+	rm -f /tmp/html.raw /tmp/html.input /tmp/html.version /tmp/html.stop
+	if ! guest_mount; then
+		echo "guest html: rootfs disk not attached (WEBKIT placeholder)"
+		return 1
+	fi
+
+	chroot "$GUEST_ROOT" /opt/zhibox/launch.sh /out/html.raw
+	rc=$?
+	echo "guest html: render rc=$rc"
+
+	guest_umount
+
+	if [ "$rc" -eq 0 ] && [ -s /tmp/html.raw ]; then
+		echo "guest html: /tmp/html.raw ready"
+		return 0
+	fi
+	rm -f /tmp/html.raw
+	return 1
+}
+
+# GUI 用: レンダラを常駐させ、最初のフレームができたら戻る。
+start_guest_html_live() {
+	rm -f /tmp/html.raw /tmp/html.input /tmp/html.version /tmp/html.stop
+	if ! guest_mount; then
+		echo "guest html: rootfs disk not attached (WEBKIT placeholder)"
+		return 1
+	fi
+
+	echo "guest html: live renderer starting"
+	ZH_HTML_LIVE=1 chroot "$GUEST_ROOT" \
+		/opt/zhibox/launch.sh /out/html.raw &
+	GUEST_PID=$!
+
+	i=0
+	while [ "$i" -lt 1200 ]; do
+		[ -s /tmp/html.raw ] && break
+		kill -0 "$GUEST_PID" 2>/dev/null || break
+		i=$((i + 1))
+		sleep 0.1
+	done
+
+	if [ -s /tmp/html.raw ]; then
+		echo "guest html: live ready (pid $GUEST_PID)"
+		return 0
+	fi
+
+	echo "guest html: live render failed"
+	touch /tmp/html.stop 2>/dev/null
+	wait "$GUEST_PID" 2>/dev/null
+	GUEST_PID=""
+	guest_umount
+	return 1
+}
+
+stop_guest_html_live() {
+	touch /tmp/html.stop 2>/dev/null
+
+	if [ -n "$GUEST_PID" ]; then
+		i=0
+		while kill -0 "$GUEST_PID" 2>/dev/null && [ "$i" -lt 100 ]; do
+			i=$((i + 1))
+			sleep 0.1
+		done
+		if kill -0 "$GUEST_PID" 2>/dev/null; then
+			kill "$GUEST_PID" 2>/dev/null
+		fi
+		wait "$GUEST_PID" 2>/dev/null
+		GUEST_PID=""
+	fi
+
+	rm -f /tmp/html.stop /tmp/html.input
+	guest_umount
+}
+
 echo
 echo "=============================================="
 echo "  openEuler kernel boot test"
@@ -19,9 +158,17 @@ if grep -q boottest /proc/cmdline 2>/dev/null; then
   sleep 5
   halt -f
 fi
+
 if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
-  echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
-  /bin/gradient
-  echo "(framebuffer demo finished)"
+	echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
+	if grep -q zh_html_root /proc/cmdline 2>/dev/null; then
+		start_guest_html_live || true
+	fi
+	/bin/gradient
+	echo "(framebuffer demo finished)"
+	stop_guest_html_live
+elif grep -q zh_html_root /proc/cmdline 2>/dev/null; then
+	render_guest_html || true
 fi
+
 exec /bin/sh

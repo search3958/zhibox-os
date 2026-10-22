@@ -13,7 +13,7 @@
 | `kernel/` | カーネルソース (74,490ファイル) | 1.1GB |
 | `kernel.git/` | クローンの git 履歴（shallow, `OLK-5.10` @ `1cd35e303`） | 219MB |
 | `scripts/` | ビルド・起動・検証スクリプト | 数KB |
-| `output/` | ビルド成果物（`bzImage`, `config`, `System.map`, `initramfs.cpio.gz`, `boot.log`）※`.gitignore` 対象 | 17MB |
+| `output/` | ビルド成果物（`bzImage`, `config`, `System.map`, `initramfs.cpio.gz`, `rootfs.img`, `boot.log`）※`.gitignore` 対象 | 17MB + rootfs |
 | `README.md` / `.gitignore` / `build.log` | ドキュメント・設定・ビルドログ | — |
 
 > **レイアウトの注意**: `kernel/.git` は `kernel.git/` に分離してあります。
@@ -41,15 +41,17 @@ bash scripts/tools/k.sh log --oneline -5
 - gcc 11.4 / make / flex / bison / libelf / libssl / bc / cpio / dwarves / rsync / git
 - **qemu-system-x86_64** + **qemu-system-gui**（画面表示用 GTK/SDL）
 - **busybox-static**（initramfs 用 = distro パッケージ）
-- HTML+CSS ウィンドウのレンダリング用（任意）:
-  `python3-gi` / `gir1.2-webkit2-4.0` / `libwebkit2gtk-4.0-37` / `xvfb`
+- ゲスト WebKitGTK 用 rootfs の作成（初回のみ）:
+  `debootstrap` / `e2fsprogs`（macOS は `e2fsprogs` と QEMU だけでよい）。
+  WebKitGTK 本体は**ゲスト rootfs の中**に入るため、ホスト側に
+  `libwebkit2gtk` を入れる必要はない
 - ビルドツリーは WSL の ext4 上 `~/kernel-src` に展開して使用
   （Windows の 9p マウントは遅く、かつ大文字小文字の制約を受けるため）
 
 ### macOS: Apple Silicon（ネイティブ、コンテナ不要）
 
 ```bash
-brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils findutils
+brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils findutils e2fsprogs
 ```
 
 - カーネルはフリースタンディングなので、`*-elf-gcc`（ベアメタル向け）でクロスコンパイルできる
@@ -62,8 +64,10 @@ brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils
 - initramfs の `gradient`（フレームバッファ描画デモ）も macOS で生成できる。Linux 用の
   静的 libc が無いため、`scripts/host/darwin/linux-shim/`（syscall 直叩きの最小 libc 代替）と
   `x86_64-elf-gcc` で freestanding な静的 ELF としてクロスビルドする（追加依存なし）
-- HTML+CSS のレンダリングは **システムの WebKit (WKWebView)** を使う
-  （WebKitGTK は Linux 専用のため）。`swiftc`（Xcode Command Line Tools）が必要
+- HTML+CSS は **QEMU ゲスト内の Linux で WebKitGTK を実行**して描画する。
+  `output/rootfs.img` は WSL/Linux の `debootstrap` でも、macOS の
+  `scripts/build-rootfs.sh`（QEMU ゲスト内で apt）でも作れる。
+  rootfs が無い場合は `WEBKIT` はプレースホルダーになる
 - QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
 ## ビルド + 起動確認（1コマンド）
@@ -101,7 +105,9 @@ GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起�
 - **文字**: `HarmonyOS_Sans_SC_Regular.ttf` を TrueType レンダリングで描画
 - **マウス**: QEMU ウィンドウ内をクリックしてポインタをグラブ（PS/2 マウス）
 - **ウィンドウ**: タイトルバーをドラッグで移動、クリックで最前面へ
-- **HTML+CSS**: 4 番目の `WEBKIT` ウィンドウに表示（WebKit / JavaScript 無効）
+- **HTML+CSS**: 4 番目の `WEBKIT` ウィンドウに表示（ゲスト Linux の WebKitGTK / JavaScript 無効）
+- **hover**: `WEBKIT` ウィンドウ内のカード / ピル / ロゴにマウスを重ねると、
+  CSS `:hover` の移動・発光・トランジションがリアルタイムに反映される
 - **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
 
 ### GPU アクセラレーション (virtio-gpu)
@@ -148,48 +154,75 @@ GUI 起動では QEMU の **virtio-gpu** (`-vga virtio`) を使います。
   bash scripts/boot-gui.sh
   ```
 
-### HTML+CSS ウィンドウ (WebKit / JavaScript 無効)
+### HTML+CSS ウィンドウ (ゲスト Linux の WebKitGTK / JavaScript 無効)
 
-`scripts/guest/web/index.html` を WebKit でレンダリングし、**PNG を介さず
-raw RGBA のまま** initramfs に同梱して、デスクトップの 4 番目のウィンドウ
-(`WEBKIT`) に表示します。
+`scripts/guest/web/index.html` を **QEMU ゲスト内の Linux** で WebKitGTK に
+描画させ、PNG を介さず raw RGBA のまま `WEBKIT` ウィンドウに表示します。
+ホスト (macOS/WSL) ではレンダリングしません。
 
 ```
-HTML+CSS --[WebKitGTK (WSL) / WKWebView (macOS), JS off]--> raw RGBA
-         --[initramfs]--> /usr/share/zhibox/html.raw
-         --[gradient]--> バイリニア縮小 --> /dev/fb0 の WEBKIT ウィンドウ
+rootfs.img (Debian/Ubuntu + WebKitGTK + Xvfb)  -- IDE /dev/sda
+        |
+        +-- guest init: ext4 を ro マウント -> chroot (GUI では常駐)
+              +-- launch.sh: Xvfb :99 + dbus-run-session
+                    +-- WebKitGTK (JavaScript OFF) -> /out/html.raw
+                    +-- /out/html.version を原子的に更新
+        |
+        +-- /out は initramfs の /tmp に bind
+              +-- fb-gradient: バイリニア縮小 -> /dev/fb0 の WEBKIT ウィンドウ
+              +-- fb-gradient -> /tmp/html.input (ポインタ座標)
 ```
 
-- **レンダリング**: 既定 640x400。ウィンドウ本文 (約 500x313) に
-  アスペクト比を保って縮小するため、文字が読めるサイズになる
-- **JavaScript 無効**: WebKitGTK は `WebKitSettings:enable-javascript=FALSE`、
-  macOS は `WKWebpagePreferences.allowsContentJavaScript = NO`。さらに
-  HTML 側の CSP でも script を禁止。ページ内の `<noscript>` バッジで確認できる
-- **macOS と WSL の違い**: WebKitGTK は Linux 専用 (Homebrew の bottle も
-  Linux のみ) のため、macOS は同じ WebKit エンジンのシステムフレームワーク
-  (WKWebView) を使う。WSL は WebKitGTK を使う
-- **静的スナップショット**: ビルド時にレンダリングする。ページ内のスクロールや
-  リンク操作はできないが、ウィンドウのドラッグ・前面化は通常どおり動く
+- **レンダリング場所**: ゲスト Linux の WebKitGTK (GTK3)。macOS の WKWebView や
+  ホスト側のビルド時レンダリングは使いません
+- **JavaScript 無効**: `WebKitSettings:enable-javascript=FALSE` と HTML の CSP の
+  両方で禁止。ページ内の `<noscript>` バッジで確認できます。hover は CSS だけで
+  動くため、JavaScript を有効にする必要はありません
+- **Xvfb**: `/dev/fb0` は `fb-gradient` が占有したまま、WebKitGTK は Xvfb 上の
+  通常の Gtk ウィンドウに描画します（Xorg を fb0 に載せない）
+- **hover の経路**: `fb-gradient` がマウス位置を `/tmp/html.input` に書き、
+  ゲスト側の `render-html.py` が `libXtst` の XTEST で Xvfb のポインタを動かします。
+  WebKit が `:hover` を再評価して raw を書き直し、`/tmp/html.version` の
+  フレーム番号が変わったときだけ `fb-gradient` が raw を読み直します
+- **実行タイミング**: GUI 起動ではレンダラを常駐させ、hover のたびに更新します。
+  シリアル起動では従来どおり 1 枚だけ描画して終了します。ページを変更したら
+  rootfs を作り直してください（カーネルの再ビルドは不要）
+- **rootfs が無い場合**: `WEBKIT` ウィンドウは `HTML RENDER UNAVAILABLE` の
+  プレースホルダーになります。ホスト側で代わりに描画することはしません
 
-**WSL の依存パッケージ** (初回のみ):
+#### 1. ゲスト rootfs を作る (初回のみ)
+
+**WSL / Linux**:
 
 ```bash
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-    gir1.2-webkit2-4.0 libwebkit2gtk-4.0-37 xvfb fonts-dejavu-core
-# Ubuntu 24.04 以降は gir1.2-webkit2-4.1 / libwebkit2gtk-4.1-0
+sudo apt install debootstrap e2fsprogs
+sudo bash scripts/build-rootfs.sh
+# -> output/rootfs.img (ext4, パーティションなし, 既定 2G)
 ```
 
-**単体でレンダリング / 確認**:
+- `debootstrap` で amd64 の最小 Debian/Ubuntu を作り、その中に
+  WebKitGTK (4.0/4.1 を自動判定) / Python GI / Xvfb / libXtst / DejaVu フォントを入れます
+- ホストの suite を既定で使います。変える場合:
+  `ZH_ROOTFS_SUITE=bookworm sudo -E bash scripts/build-rootfs.sh`
+- rootfs の作業ディレクトリは既定で `$HOME/zhibox-rootfs`
+  （WSL の ext4 上。NTFS の `/mnt/c` では chroot できないため）
+
+**macOS**:
 
 ```bash
-bash scripts/render-html.sh            # -> output/html.raw
-bash scripts/render-html.sh /tmp/x.raw # 出力先を指定
+brew install qemu e2fsprogs
+bash scripts/build-rootfs.sh
+# -> output/rootfs.img
 ```
 
-`build-initramfs.sh` は自動で `render-html.sh` を呼びます。WebKit が無い環境では
-警告を出して続行し、ゲスト側は `HTML RENDER UNAVAILABLE` のプレースホルダーに
-なります。レンダリングをスキップしたい場合は `ZH_HTML_RENDER=0`、
-既存の raw を使う場合は `ZH_HTML_RAW=/path/to/html.raw` を指定してください。
+- Linux コンテナやホスト側 WebKitGTK は使いません。Ubuntu 24.04 の公式
+  base rootfs を ext4 イメージにし、**そのイメージを QEMU で起動して
+  ゲスト自身に apt させる**ため、macOS でも同じ rootfs を作れます
+- 初回は Ubuntu base の取得と WebKitGTK の導入で 10〜20 分ほどかかります
+- 途中経過は `output/build/rootfs-guest/firstboot.log` に出ます
+- `sudo` は不要です。`output/bzImage` を先に作ってください
+
+#### 2. initramfs を作り直して起動
 
 ```bash
 bash scripts/build-initramfs.sh
@@ -197,14 +230,38 @@ cp ~/initramfs.cpio.gz output/initramfs.cpio.gz
 bash scripts/boot-gui.sh
 ```
 
-起動ログに次のように出れば、raw の読み込みと縮小キャッシュが成功しています:
+`boot-qemu.sh` は `output/rootfs.img` があれば自動で
+
+- IDE ディスク (`-drive ...,if=ide`) として接続
+- メモリを 2G に増やす
+- カーネルコマンドラインに `zh_html_root=1` を追加
+
+します。rootfs が無い場合は 1G のまま、プレースホルダーで起動します。
+
+GUI 起動ログに次のように出れば、ゲスト内の WebKitGTK と live hover が
+動いています:
 
 ```
+guest html: rootfs /dev/sda
+guest html: live renderer starting
+guest-html: Xvfb :99 640x400 live=1
+render-html: WebKit2-2.52, JavaScript=False, live=True
+render-html: 640x400 RGBA -> /out/html.raw (...) frame=1
+guest html: live ready (pid ...)
 gradient: html 640x400 (raw RGBA, JS off)
 gradient: html 640x400 -> 500x313 (raw RGBA)
+gradient: html frame 2        # マウスを重ねたとき
 ```
 
-raw 形式 (リトルエンディアン):
+シリアル起動 (`zh_gui=1` なし) では `guest html: /tmp/html.raw ready` の後、
+1 枚だけ描画してシェルに戻ります。
+
+> 検証済み: Ubuntu 24.04 base + WebKitGTK 2.52.6 + Xvfb。QEMU ゲスト内で
+> 640x400 RGBA を生成して `WEBKIT` ウィンドウに表示し、QEMU monitor の
+> `mouse_move` でカードに重ねたときに `:hover` の浮き上がりと発光が
+> フレームバッファへ反映されるところまで確認。
+
+#### raw 形式 (リトルエンディアン)
 
 | オフセット | 内容 |
 |---|---|
@@ -215,10 +272,19 @@ raw 形式 (リトルエンディアン):
 | 20 | u32 stride (bytes) |
 | 24 | RGBA 画素 (先頭が上端) |
 
-- ページを変更したら `bash scripts/build-initramfs.sh` を再実行する
-  （カーネルの再ビルドは不要）
-- 解像度を変える: `ZH_HTML_WIDTH=800 ZH_HTML_HEIGHT=500 bash scripts/render-html.sh`
-  （ウィンドウ側は自動でフィットする）
+live モードでは raw のほかに次の共有ファイルを使います。
+
+| パス (initramfs / guest) | 内容 |
+|---|---|
+| `/tmp/html.raw` / `/out/html.raw` | 現在のフレーム (上記形式) |
+| `/tmp/html.version` / `/out/html.version` | u32 フレーム番号。raw 更新後に原子的に置換 |
+| `/tmp/html.input` / `/out/html.input` | `x y` (640x400 座標)。負値は hover 解除 |
+| `/tmp/html.stop` / `/out/html.stop` | GUI 終了時に init が作り、レンダラが終了する |
+
+- 既定の描画サイズは 640x400。変える場合は
+  `scripts/guest/web/launch.sh` の既定値を編集して rootfs を作り直します
+- `ZH_HTML_RAW=/path/to/raw` を指定して `build-initramfs.sh` を実行すると、
+  デバッグ用に initramfs へ raw を埋め込めます（通常の経路ではありません）
 
 ### シリアルコンソール（対話・-nographic）
 
@@ -273,14 +339,15 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | パス | 用途 |
 |---|---|
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
-| `scripts/build-initramfs.sh` | busybox + gradient + WebKit raw の initramfs を生成 |
-| `scripts/render-html.sh` | HTML+CSS を WebKit で raw RGBA にレンダリング (WSL/macOS 分岐) |
-| `scripts/boot-qemu.sh` | シリアルコンソールで対話起動 |
+| `scripts/build-rootfs.sh` | ゲスト Linux 用 rootfs.img (WebKitGTK + Xvfb) を生成。macOS は QEMU ゲスト内 apt に分岐 |
+| `scripts/build-rootfs-guest.sh` | macOS 専用: Ubuntu base + QEMU ゲストで rootfs.img を生成 |
+| `scripts/build-initramfs.sh` | busybox + gradient の initramfs を生成 (HTML raw は同梱しない) |
+| `scripts/boot-qemu.sh` | QEMU 起動。rootfs.img があれば IDE 接続してゲスト描画を有効化 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
-| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / フォント・壁紙アセット |
-| `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` / `render-html.swift` (WKWebView) |
-| `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助 / `render-html.py` (WebKitGTK) |
+| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / `web/render-html.py` / `web/launch.sh` / フォント・壁紙アセット |
+| `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
+| `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助 |
 | `scripts/tools/` | ホスト共通ツール: `k.sh` / `case-collision-report.sh` |
 
 > ディレクトリ構成の詳細と、新しいスクリプトを置く場所は `scripts/README.md` を参照。

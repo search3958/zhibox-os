@@ -66,8 +66,8 @@ if [ "$OS" = macos ]; then zh_mount_volume; fi
 SRC="$(zh_src_tree)"
 if [ -f "$SRC/Makefile" ]; then
   if [ "${SYNC:-0}" = "1" ]; then
-    say "1/6 リポジトリ側の変更をオーバーレイ同期 (SYNC=1, size比較のみで高速)"
-    rsync -a --size-only --exclude='.git' "$REPO_ROOT/kernel/" "$SRC/"
+    say "1/6 リポジトリ側の変更をオーバーレイ同期 (SYNC=1, サイズ+mtime で高速)"
+    rsync -a --exclude='.git' "$REPO_ROOT/kernel/" "$SRC/"
   else
     say "1/6 ビルド用ツリーを利用 (同期は SYNC=1 で有効)"
   fi
@@ -165,30 +165,34 @@ say "4/6 最小 initramfs (busybox) を作成"
 bash "$REPO_ROOT/scripts/build-initramfs.sh"
 
 # ----------------------------------------------------------- 5. QEMU ブートテスト
-say "5/6 QEMU でブート確認 (最大300秒, TCG エミュレーションのため低速)"
-QEMU="$(command -v qemu-system-x86_64)" || fail "qemu-system-x86_64 がありません (brew install qemu)"
-TIMEOUT_CMD=timeout
-command -v gtimeout >/dev/null && TIMEOUT_CMD=gtimeout
-set +e
-"$TIMEOUT_CMD" -k 10 300 "$QEMU" \
-  -machine pc -vga std -m 512M -smp 2 -no-reboot \
-  -kernel "$SRC/arch/x86/boot/bzImage" \
-  -initrd "$INITRD" \
-  -append "console=ttyS0 rdinit=/init panic=-1 loglevel=4 boottest" \
-  -nographic -monitor none \
-  > "$LOG" 2>&1
-set -e
-
-echo "---- シリアルコンソール出力 (先頭40行) ----"
-head -40 "$LOG"
-echo "-------------------------------------------"
-
-if grep -q "ZHIBOX_BOOT_OK" "$LOG"; then
-  echo "[OK] カーネルは QEMU 上で正常にブートしました。"
+if [ "${ZH_SKIP_BOOT_TEST:-0}" = "1" ]; then
+  say "5/6 QEMU ブート確認をスキップ (ZH_SKIP_BOOT_TEST=1)"
 else
-  echo "[NG] ブート確認に失敗しました。以下が全出力です:"
-  cat "$LOG"
-  exit 1
+  say "5/6 QEMU でブート確認 (最大300秒, TCG エミュレーションのため低速)"
+  QEMU="$(command -v qemu-system-x86_64)" || fail "qemu-system-x86_64 がありません (brew install qemu)"
+  TIMEOUT_CMD=timeout
+  command -v gtimeout >/dev/null && TIMEOUT_CMD=gtimeout
+  set +e
+  "$TIMEOUT_CMD" -k 10 300 "$QEMU" \
+    -machine pc -vga std -m 512M -smp 2 -no-reboot \
+    -kernel "$SRC/arch/x86/boot/bzImage" \
+    -initrd "$INITRD" \
+    -append "console=ttyS0 rdinit=/init panic=-1 loglevel=4 boottest" \
+    -nographic -monitor none \
+    > "$LOG" 2>&1
+  set -e
+
+  echo "---- シリアルコンソール出力 (先頭40行) ----"
+  head -40 "$LOG"
+  echo "-------------------------------------------"
+
+  if grep -q "ZHIBOX_BOOT_OK" "$LOG"; then
+    echo "[OK] カーネルは QEMU 上で正常にブートしました。"
+  else
+    echo "[NG] ブート確認に失敗しました。以下が全出力です:"
+    cat "$LOG"
+    exit 1
+  fi
 fi
 
 # ------------------------------------------------------------ 6. 成果物の書き出し
@@ -198,7 +202,9 @@ cp -f "$SRC/arch/x86/boot/bzImage" "$OUT/bzImage"
 cp -f "$SRC/.config"               "$OUT/config"
 cp -f "$SRC/System.map"            "$OUT/System.map"
 cp -f "$INITRD"                    "$OUT/initramfs.cpio.gz"
-cp -f "$LOG"                       "$OUT/boot.log"
+if [ -f "$LOG" ]; then
+  cp -f "$LOG"                     "$OUT/boot.log"
+fi
 cp -f "$REPO_ROOT/scripts/boot-qemu.sh" "$OUT/boot-qemu.sh"
 ls -lh "$OUT"
 

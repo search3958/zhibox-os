@@ -671,8 +671,8 @@ static void build_background(void)
 		footer_color = rgb(72, 96, 140);
 	}
 
-	ui_text(background, (screen_w - ui_text_width("ZHIBOX OS", 40)) / 2,
-		screen_h / 12, "ZHIBOX OS", title_color, 40);
+	ui_text(background, (screen_w - ui_text_width("Zhibox OS", 40)) / 2,
+		screen_h / 12, "Zhibox OS", title_color, 40);
 
 	ui_text(background, 20, screen_h - 34,
 		"DRAG TITLE BAR   Q TO QUIT", footer_color, 16);
@@ -745,7 +745,7 @@ static void draw_window(const struct window *window)
 		}
 	} else if (window->kind == WIN_TEXT) {
 		const char *lines[] = {
-			"ZHIBOX OS",
+			"Zhibox OS",
 			"OLK-5.10",
 			"FB + EVDEV",
 			"Q TO QUIT",

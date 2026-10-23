@@ -14,6 +14,7 @@
 | `kernel.git/` | クローンの git 履歴（shallow, `OLK-5.10` @ `1cd35e303`） | 219MB |
 | `scripts/` | ビルド・起動・検証スクリプト | 数KB |
 | `output/` | ビルド成果物（`bzImage`, `config`, `System.map`, `initramfs.cpio.gz`, `rootfs.img`, `boot.log`）※`.gitignore` 対象 | 17MB + rootfs |
+| `build.sh` | **差分ビルド + QEMU 起動**の入口（`sh build.sh`） | — |
 | `README.md` / `.gitignore` / `build.log` | ドキュメント・設定・ビルドログ | — |
 
 > **レイアウトの注意**: `kernel/.git` は `kernel.git/` に分離してあります。
@@ -70,7 +71,38 @@ brew install x86_64-elf-gcc x86_64-elf-binutils qemu make gnu-sed gawk coreutils
   rootfs が無い場合は `WEBKIT` はプレースホルダーになる
 - QEMU は TCG（ソフトウェアエミュレーション）で動くためブートに数分かかる
 
-## ビルド + 起動確認（1コマンド）
+## 差分ビルド + 起動（1コマンド）
+
+```bash
+# リポジトリ直下で実行 (WSL / Linux / macOS 共通)
+sh build.sh
+```
+
+変更された成果物だけを作り直し、そのまま QEMU を GUI で起動します。
+
+| 対象 | 再生成の条件 |
+|---|---|
+| kernel (`output/bzImage`) | `kernel/` が `bzImage` より新しいとき。`make` 自体も差分ビルド |
+| initramfs | `scripts/guest/`・フォント・壁紙・`linux-shim` の内容ハッシュが変わったとき |
+| rootfs | イメージが無いとき。`scripts/guest/web/` だけ変わったときは **QEMU ゲストで `/opt/zhibox` を差分更新**（apt は再実行しない） |
+
+```bash
+sh build.sh --serial          # シリアルコンソールで起動
+sh build.sh --no-boot         # ビルドだけ (起動しない)
+
+sh build.sh --rebuild-kernel  # カーネルを強制ビルド
+sh build.sh --rebuild-initramfs
+sh build.sh --rebuild-rootfs  # rootfs を apt から作り直す (長時間)
+```
+
+- スタンプは `output/.build-stamps/` に保存されます
+- rootfs のパッケージ定義（`build-rootfs*.sh`）を変えた場合は自動再作成せず、
+  `--rebuild-rootfs` を促す警告だけ出します
+- カーネルの変更検出は mtime ベースです。チェックアウト直後などで確実に
+  作り直したいときは `--rebuild-kernel` を使ってください
+- 個別のスクリプトを直接使う従来の方法も残っています（次節以降）
+
+## カーネル単体のビルド + ブート確認
 
 ```bash
 # WSL / macOS 共通 (リポジトリ直下で実行)
@@ -87,7 +119,7 @@ wsl -d Ubuntu-22.04 -u root -e bash /mnt/c/.../zhibox-os/scripts/build-and-boot.
 5. **QEMU でブート確認**（`ZHIBOX_BOOT_OK` を判定し自動電源オフ）→ 6. `output/` へ書き出し
 
 - 2回目以降はツリーを再利用し差分のみ
-- リポジトリ側の編集を取り込む: `SYNC=1 bash scripts/build-and-boot.sh`（`--size-only` 高速同期）
+- リポジトリ側の編集を取り込む: `SYNC=1 bash scripts/build-and-boot.sh`（サイズ+mtime の高速同期）
 - ツリー作り直し: `bash scripts/host/wsl/reextract.sh`
 - 途中経過: 別窓から `tail -f output/build.log`
 
@@ -338,6 +370,7 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 
 | パス | 用途 |
 |---|---|
+| `build.sh` | **差分ビルド + QEMU 起動**の入口 (`sh build.sh`) |
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
 | `scripts/build-rootfs.sh` | ゲスト Linux 用 rootfs.img (WebKitGTK + Xvfb) を生成。macOS は QEMU ゲスト内 apt に分岐 |
 | `scripts/build-rootfs-guest.sh` | macOS 専用: Ubuntu base + QEMU ゲストで rootfs.img を生成 |
@@ -345,6 +378,7 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | `scripts/boot-qemu.sh` | QEMU 起動。rootfs.img があれば IDE 接続してゲスト描画を有効化 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
+| `scripts/guest/patch-rootfs.sh` | rootfs.img の `/opt/zhibox` だけを更新する一時 init (web 差分反映用) |
 | `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / `web/render-html.py` / `web/launch.sh` / フォント・壁紙アセット |
 | `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
 | `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助 |

@@ -15,6 +15,7 @@ scripts/
 │   └── common.sh          # 共通 bash (OS 判定・パス・ツール検出)
 ├── guest/                 # ゲスト (Linux) 側で動くもの
 │   ├── init               #   PID 1 (busybox sh, rootfs マウント / live renderer 管理)
+│   ├── patch-rootfs.sh    #   rootfs.img の /opt/zhibox を差分更新する一時 init
 │   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ + hover 入力)
 │   ├── zh_font.c/.h       #   TrueType パーサ / ラスタライザ (自前実装)
 │   ├── zh_png.c/.h        #   PNG デコーダ / inflate (自前実装)
@@ -41,6 +42,9 @@ scripts/
     ├── k.sh               #   kernel.git 用 git ラッパー
     └── case-collision-report.sh
 ```
+
+ルートの `build.sh` が差分ビルド + QEMU 起動の入口です。`kernel/`・`scripts/guest/`・
+`scripts/guest/web/` の変更を検出し、必要な成果物だけを作り直します。
 
 ## 置き場所の判断
 

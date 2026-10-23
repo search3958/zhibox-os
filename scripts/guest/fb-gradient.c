@@ -4,7 +4,7 @@
  *
  *   - /dev/fb0 に直接描画 (X11 / Wayland 不要)
  *   - evdev (/dev/input/event*) から PS/2 マウスを読む
- *   - 簡易ウィンドウ: タイトルバーをドラッグで移動、クリックで前面化
+ *   - window_ops を登録する簡易ウィンドウマネージャ (drag / raise / hover 通知)
  *   - q / Esc / Ctrl+C で終了
  *
  * WSL では gcc -static、macOS では linux-shim + x86_64-elf-gcc で
@@ -32,13 +32,21 @@
 #define BORDER		2
 #define CURSOR_W	10
 #define CURSOR_H	16
-#define WINDOW_COUNT	4
-#define HTML_INDEX	3
+#define ZH_WM_MAX_WINDOWS	8
+#define ZH_GRADIENT_READY_PATH	"/tmp/gradient.ready"
 
-enum {
-	WIN_GRADIENT,
-	WIN_TEXT,
-	WIN_HTML,
+struct window;
+
+/*
+ * ウィンドウの中身は「ops」で差し替える。
+ * 新しい種類を追加するときは draw / tick / pointer を実装し、
+ * desktop_create() で wm_add() するだけでよい。
+ */
+struct window_ops {
+	const char *name;
+	void (*draw)(struct window *win, int x, int y, int w, int h);
+	void (*tick)(struct window *win);
+	void (*pointer)(struct window *win, int x, int y, int inside);
 };
 
 struct window {
@@ -46,8 +54,19 @@ struct window {
 	const char *title;
 	uint32_t body;
 	uint32_t bar;
-	int kind;
+	const struct window_ops *ops;
+	void *data;
 };
+
+struct window_manager {
+	struct window windows[ZH_WM_MAX_WINDOWS];
+	struct window *stack[ZH_WM_MAX_WINDOWS];	/* bottom -> top */
+	int count;
+	struct window *pointer_window;
+};
+
+static struct window_manager wm;
+static struct window *html_window;
 
 static uint8_t *fb;
 static uint8_t *background;
@@ -62,7 +81,7 @@ static int screen_h;
 static int mouse_fd = -1;
 static int mouse_x;
 static int mouse_y;
-static int mouse_grab = -1;
+static struct window *mouse_grab;
 static int grab_dx;
 static int grab_dy;
 static int scene_dirty;
@@ -71,9 +90,6 @@ static int cursor_y = -1000;
 
 static struct termios saved_tty;
 static int tty_raw;
-
-static struct window windows[WINDOW_COUNT];
-static int stacking[WINDOW_COUNT] = {0, 1, 2, 3};
 
 /* ------------------------------------------------------------ フォント / 壁紙 */
 
@@ -120,6 +136,7 @@ struct html_surface {
 static struct html_surface html_view;
 static int html_input_last_x = -100000;
 static int html_input_last_y = -100000;
+static int html_poll;
 
 /* ------------------------------------------------------------ DRM 加速
  *
@@ -678,7 +695,7 @@ static void build_background(void)
 		"DRAG TITLE BAR   Q TO QUIT", footer_color, 16);
 }
 
-static void draw_window(const struct window *window)
+static void draw_window(struct window *window)
 {
 	int x = window->x;
 	int y = window->y;
@@ -696,83 +713,112 @@ static void draw_window(const struct window *window)
 
 	ui_text(scene, x + 10, y + 2, window->title, rgb(255, 255, 255), 18);
 
-	if (window->kind == WIN_GRADIENT) {
-		int swatch_w = w - 4 * BORDER - 16;
-		int swatch_h = h - TITLE_H - 4 * BORDER - 16;
-		int row;
+	if (window->ops && window->ops->draw) {
+		int cx = x + 2 * BORDER + 6;
+		int cy = y + TITLE_H + 2 * BORDER + 6;
+		int cw = w - 4 * BORDER - 12;
+		int ch = h - TITLE_H - 4 * BORDER - 12;
 
-		for (row = 0; row < swatch_h; row++) {
-			uint8_t green = (uint8_t)(255 * row / (swatch_h - 1));
-			uint32_t color = rgb(255, green, 0);
-			int column;
-
-			for (column = 0; column < swatch_w; column++)
-				put_pixel(scene, x + 2 * BORDER + 8 + column,
-					  y + TITLE_H + 2 * BORDER + 8 + row,
-					  color);
-		}
-		rect_outline(scene, x + 2 * BORDER + 8,
-			     y + TITLE_H + 2 * BORDER + 8, swatch_w,
-			     swatch_h, rgb(12, 16, 28));
-	} else if (window->kind == WIN_HTML) {
-		int bx = x + 2 * BORDER + 6 + html_view.off_x;
-		int by = y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
-
-		if (html_view.scaled) {
-			int row;
-			int column;
-
-			for (row = 0; row < html_view.scaled_h; row++)
-				for (column = 0;
-				     column < html_view.scaled_w; column++)
-					put_pixel(scene, bx + column,
-						  by + row,
-						  html_view.scaled[
-							  (size_t)row *
-								  html_view.scaled_w +
-							  column]);
-			rect_outline(scene, bx - 1, by - 1,
-				     html_view.scaled_w + 2,
-				     html_view.scaled_h + 2,
-				     rgb(96, 128, 152));
-		} else {
-			const char *message = "HTML RENDER UNAVAILABLE";
-
-			ui_text(scene,
-				x + (w - ui_text_width(message, 16)) / 2,
-				y + TITLE_H + (h - TITLE_H) / 2 - 8,
-				message, rgb(200, 214, 234), 16);
-		}
-	} else if (window->kind == WIN_TEXT) {
-		const char *lines[] = {
-			"Zhibox OS",
-			"OLK-5.10",
-			"FB + EVDEV",
-			"Q TO QUIT",
-		};
-		unsigned int i;
-
-		if (window->title[0] == 'I') {
-			lines[0] = "MOUSE  : EVDEV";
-			lines[1] = "DRAG   : TITLE";
-			lines[2] = "RAISE  : CLICK";
-			lines[3] = "EXIT   : Q";
-		}
-
-		for (i = 0; i < 4; i++)
-			ui_text(scene, x + 2 * BORDER + 10,
-				y + TITLE_H + 2 * BORDER + 10 + (int)i * 22,
-				lines[i], rgb(226, 232, 244), 16);
+		if (cw > 0 && ch > 0)
+			window->ops->draw(window, cx, cy, cw, ch);
 	}
+}
+
+/* ------------------------------------------------------------ window manager */
+
+static struct window *wm_add(const struct window_ops *ops, const char *title,
+			     uint32_t body, uint32_t bar, void *data)
+{
+	struct window *win;
+
+	if (wm.count >= ZH_WM_MAX_WINDOWS) {
+		printf("gradient: window limit reached (%d)\n",
+		       ZH_WM_MAX_WINDOWS);
+		return NULL;
+	}
+
+	win = &wm.windows[wm.count];
+	memset(win, 0, sizeof(*win));
+	win->title = title;
+	win->body = body;
+	win->bar = bar;
+	win->ops = ops;
+	win->data = data;
+	wm.stack[wm.count] = win;
+	wm.count++;
+	return win;
+}
+
+static void wm_raise(struct window *win)
+{
+	int position = -1;
+	int i;
+
+	for (i = 0; i < wm.count; i++)
+		if (wm.stack[i] == win)
+			position = i;
+	if (position < 0 || position == wm.count - 1)
+		return;
+
+	for (i = position; i < wm.count - 1; i++)
+		wm.stack[i] = wm.stack[i + 1];
+	wm.stack[wm.count - 1] = win;
+	scene_dirty = 1;
+}
+
+static struct window *wm_at(int x, int y)
+{
+	int i;
+
+	for (i = wm.count - 1; i >= 0; i--) {
+		struct window *win = wm.stack[i];
+
+		if (x >= win->x && x < win->x + win->w &&
+		    y >= win->y && y < win->y + win->h)
+			return win;
+	}
+	return NULL;
+}
+
+static void wm_draw(void)
+{
+	int i;
+
+	for (i = 0; i < wm.count; i++)
+		draw_window(wm.stack[i]);
+}
+
+static void wm_tick(void)
+{
+	int i;
+
+	for (i = 0; i < wm.count; i++) {
+		struct window *win = wm.stack[i];
+
+		if (win->ops && win->ops->tick)
+			win->ops->tick(win);
+	}
+}
+
+static void wm_pointer_update(void)
+{
+	struct window *hover = wm_at(mouse_x, mouse_y);
+
+	if (wm.pointer_window != hover) {
+		if (wm.pointer_window && wm.pointer_window->ops &&
+		    wm.pointer_window->ops->pointer)
+			wm.pointer_window->ops->pointer(wm.pointer_window,
+						       -1, -1, 0);
+		wm.pointer_window = hover;
+	}
+	if (hover && hover->ops && hover->ops->pointer)
+		hover->ops->pointer(hover, mouse_x, mouse_y, 1);
 }
 
 static void build_scene(void)
 {
-	int i;
-
 	buffer_copy(scene, background, (size_t)pitch * screen_h);
-	for (i = 0; i < WINDOW_COUNT; i++)
-		draw_window(&windows[stacking[i]]);
+	wm_draw();
 }
 
 static void blit_full(void)
@@ -857,56 +903,24 @@ static void clamp_mouse(void)
 		mouse_y = screen_h - 1;
 }
 
-static int window_at(int x, int y)
-{
-	int i;
-
-	for (i = WINDOW_COUNT - 1; i >= 0; i--) {
-		int index = stacking[i];
-		const struct window *window = &windows[index];
-
-		if (x >= window->x && x < window->x + window->w &&
-		    y >= window->y && y < window->y + window->h)
-			return index;
-	}
-	return -1;
-}
-
-static void raise_window(int index)
-{
-	int position = -1;
-	int i;
-
-	for (i = 0; i < WINDOW_COUNT; i++)
-		if (stacking[i] == index)
-			position = i;
-	if (position < 0 || position == WINDOW_COUNT - 1)
-		return;
-
-	for (i = position; i < WINDOW_COUNT - 1; i++)
-		stacking[i] = stacking[i + 1];
-	stacking[WINDOW_COUNT - 1] = index;
-	scene_dirty = 1;
-}
-
 static void mouse_press(void)
 {
-	int index = window_at(mouse_x, mouse_y);
+	struct window *win = wm_at(mouse_x, mouse_y);
 
-	if (index < 0)
+	if (!win)
 		return;
 
-	raise_window(index);
-	if (mouse_y < windows[index].y + TITLE_H) {
-		mouse_grab = index;
-		grab_dx = mouse_x - windows[index].x;
-		grab_dy = mouse_y - windows[index].y;
+	wm_raise(win);
+	if (mouse_y < win->y + TITLE_H) {
+		mouse_grab = win;
+		grab_dx = mouse_x - win->x;
+		grab_dy = mouse_y - win->y;
 	}
 }
 
 static void mouse_release(void)
 {
-	mouse_grab = -1;
+	mouse_grab = NULL;
 }
 
 static int handle_mouse(void)
@@ -934,9 +948,9 @@ static int handle_mouse(void)
 		}
 	}
 
-	if (mouse_grab >= 0 && changed) {
-		windows[mouse_grab].x = mouse_x - grab_dx;
-		windows[mouse_grab].y = mouse_y - grab_dy;
+	if (mouse_grab && changed) {
+		mouse_grab->x = mouse_x - grab_dx;
+		mouse_grab->y = mouse_y - grab_dy;
 		scene_dirty = 1;
 	}
 
@@ -1165,7 +1179,7 @@ invalid:
 
 static void prepare_html_cache(void)
 {
-	const struct window *window = &windows[HTML_INDEX];
+	const struct window *window = html_window;
 	int max_w;
 	int max_h;
 	int dw;
@@ -1176,7 +1190,7 @@ static void prepare_html_cache(void)
 	int old_h = 0;
 	uint32_t *scaled;
 
-	if (!html_view.raw_ok)
+	if (!window || !html_view.raw_ok)
 		return;
 
 	max_w = window->w - 4 * BORDER - 12;
@@ -1372,33 +1386,133 @@ static void html_input_write(int x, int y)
 	(void)rename(ZH_HTML_INPUT_TMP, ZH_HTML_INPUT_PATH);
 }
 
-static void html_input_update(void)
-{
-	const struct window *window = &windows[HTML_INDEX];
-	int left = window->x + 2 * BORDER + 6 + html_view.off_x;
-	int top = window->y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
-	int x = -1;
-	int y = -1;
+/* --------------------------------------------------------- window contents */
 
-	if (html_view.scaled && html_view.scaled_w > 0 &&
+static void gradient_content_draw(struct window *win, int x, int y, int w, int h)
+{
+	int swatch_w = w - 4;
+	int swatch_h = h - 4;
+	int row;
+
+	(void)win;
+	if (swatch_w <= 0 || swatch_h <= 0)
+		return;
+
+	x += 2;
+	y += 2;
+	for (row = 0; row < swatch_h; row++) {
+		uint8_t green = swatch_h > 1 ?
+			(uint8_t)(255 * row / (swatch_h - 1)) : 255;
+		uint32_t color = rgb(255, green, 0);
+		int column;
+
+		for (column = 0; column < swatch_w; column++)
+			put_pixel(scene, x + column, y + row, color);
+	}
+	rect_outline(scene, x, y, swatch_w, swatch_h, rgb(12, 16, 28));
+}
+
+static void html_content_draw(struct window *win, int x, int y, int w, int h)
+{
+	int bx = x + html_view.off_x;
+	int by = y + html_view.off_y;
+
+	(void)win;
+	if (html_view.scaled) {
+		int row;
+		int column;
+
+		for (row = 0; row < html_view.scaled_h; row++)
+			for (column = 0; column < html_view.scaled_w; column++)
+				put_pixel(scene, bx + column, by + row,
+					  html_view.scaled[
+						  (size_t)row *
+							  html_view.scaled_w +
+						  column]);
+		rect_outline(scene, bx - 1, by - 1,
+			     html_view.scaled_w + 2, html_view.scaled_h + 2,
+			     rgb(96, 128, 152));
+	} else {
+		const char *message = "HTML RENDER WAITING";
+		int tw = ui_text_width(message, 16);
+
+		ui_text(scene, x + (w - tw) / 2, y + (h - 16) / 2,
+			message, rgb(200, 214, 234), 16);
+	}
+}
+
+static void html_content_tick(struct window *win)
+{
+	(void)win;
+	if (++html_poll < 10)
+		return;
+	html_poll = 0;
+	html_refresh();
+}
+
+static void html_content_pointer(struct window *win, int x, int y, int inside)
+{
+	int left = win->x + 2 * BORDER + 6 + html_view.off_x;
+	int top = win->y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
+	int sx = -1;
+	int sy = -1;
+
+	if (inside && html_view.scaled && html_view.scaled_w > 0 &&
 	    html_view.scaled_h > 0 &&
-	    window_at(mouse_x, mouse_y) == HTML_INDEX &&
-	    mouse_x >= left && mouse_x < left + html_view.scaled_w &&
-	    mouse_y >= top && mouse_y < top + html_view.scaled_h) {
-		x = (mouse_x - left) * html_view.src_w / html_view.scaled_w;
-		y = (mouse_y - top) * html_view.src_h / html_view.scaled_h;
-		if (x < 0)
-			x = 0;
-		if (y < 0)
-			y = 0;
-		if (x >= html_view.src_w)
-			x = html_view.src_w - 1;
-		if (y >= html_view.src_h)
-			y = html_view.src_h - 1;
+	    x >= left && x < left + html_view.scaled_w &&
+	    y >= top && y < top + html_view.scaled_h) {
+		sx = (x - left) * html_view.src_w / html_view.scaled_w;
+		sy = (y - top) * html_view.src_h / html_view.scaled_h;
+		if (sx < 0)
+			sx = 0;
+		if (sy < 0)
+			sy = 0;
+		if (sx >= html_view.src_w)
+			sx = html_view.src_w - 1;
+		if (sy >= html_view.src_h)
+			sy = html_view.src_h - 1;
 	}
 
-	html_input_write(x, y);
+	html_input_write(sx, sy);
 }
+
+struct text_content {
+	const char *lines[4];
+};
+
+static void text_content_draw(struct window *win, int x, int y, int w, int h)
+{
+	const struct text_content *content = win->data;
+	unsigned int i;
+
+	(void)w;
+	(void)h;
+	if (!content)
+		return;
+	for (i = 0; i < 4; i++) {
+		if (!content->lines[i])
+			continue;
+		ui_text(scene, x + 4, y + 4 + (int)i * 22,
+			content->lines[i], rgb(226, 232, 244), 16);
+	}
+}
+
+static const struct window_ops gradient_ops = {
+	.name = "gradient",
+	.draw = gradient_content_draw,
+};
+
+static const struct window_ops text_ops = {
+	.name = "text",
+	.draw = text_content_draw,
+};
+
+static const struct window_ops html_ops = {
+	.name = "html",
+	.draw = html_content_draw,
+	.tick = html_content_tick,
+	.pointer = html_content_pointer,
+};
 
 
 static void damage_add(int x, int y, int w, int h)
@@ -1527,8 +1641,32 @@ fail:
 	drm_fd = -1;
 }
 
-static void layout_windows(void)
+static const struct text_content about_content = {
+	.lines = { "Zhibox OS", "OLK-5.10", "FB + EVDEV", "Q TO QUIT" },
+};
+
+static const struct text_content input_content = {
+	.lines = { "MOUSE  : EVDEV", "DRAG   : TITLE",
+		   "RAISE  : CLICK", "EXIT   : Q" },
+};
+
+static void place_window(struct window *win, int x, int y, int w, int h)
 {
+	if (!win)
+		return;
+	win->x = x;
+	win->y = y;
+	win->w = w;
+	win->h = h;
+}
+
+/*
+ * デスクトップの組み立て。window_ops を実装したら、ここで 1 行追加するだけで
+ * 新しいウィンドウを登録できる。描画・重ね順・ドラッグ・hover 入力は wm_* が面倒を見る。
+ */
+static void desktop_create(void)
+{
+	struct window *win;
 	int w;
 	int h;
 
@@ -1543,52 +1681,56 @@ static void layout_windows(void)
 	if (h > 250)
 		h = 250;
 
-	windows[0].x = screen_w / 12;
-	windows[0].y = screen_h / 8;
-	windows[0].w = w;
-	windows[0].h = h;
-	windows[0].title = "GRADIENT";
-	windows[0].body = rgb(30, 38, 54);
-	windows[0].bar = rgb(52, 108, 176);
-	windows[0].kind = WIN_GRADIENT;
+	win = wm_add(&gradient_ops, "GRADIENT", rgb(30, 38, 54),
+		     rgb(52, 108, 176), NULL);
+	place_window(win, screen_w / 12, screen_h / 8, w, h);
 
-	windows[1].x = screen_w / 2 + screen_w / 20;
-	windows[1].y = screen_h / 5;
-	windows[1].w = w;
-	windows[1].h = h;
-	windows[1].title = "ABOUT";
-	windows[1].body = rgb(34, 42, 58);
-	windows[1].bar = rgb(92, 74, 148);
-	windows[1].kind = WIN_TEXT;
+	win = wm_add(&text_ops, "ABOUT", rgb(34, 42, 58),
+		     rgb(92, 74, 148), (void *)&about_content);
+	place_window(win, screen_w / 2 + screen_w / 20, screen_h / 5, w, h);
 
-	windows[2].x = screen_w / 5;
-	windows[2].y = screen_h / 2 + screen_h / 12;
-	windows[2].w = w;
-	windows[2].h = h;
-	windows[2].title = "INPUT";
-	windows[2].body = rgb(30, 44, 40);
-	windows[2].bar = rgb(52, 132, 104);
-	windows[2].kind = WIN_TEXT;
+	win = wm_add(&text_ops, "INPUT", rgb(30, 44, 40),
+		     rgb(52, 132, 104), (void *)&input_content);
+	place_window(win, screen_w / 5, screen_h / 2 + screen_h / 12, w, h);
 
 	/* HTML (WebKit) ウィンドウ: 右下に 520x360 程度で配置 */
-	windows[HTML_INDEX].w = screen_w / 2 - 120;
-	if (windows[HTML_INDEX].w < 300)
-		windows[HTML_INDEX].w = screen_w - 40;
-	if (windows[HTML_INDEX].w > 560)
-		windows[HTML_INDEX].w = 560;
-	windows[HTML_INDEX].h = windows[HTML_INDEX].w * 9 / 13;
-	if (windows[HTML_INDEX].h > screen_h - 80)
-		windows[HTML_INDEX].h = screen_h - 80;
-	windows[HTML_INDEX].x = screen_w - windows[HTML_INDEX].w - 40;
-	if (windows[HTML_INDEX].x < 0)
-		windows[HTML_INDEX].x = 0;
-	windows[HTML_INDEX].y = screen_h - windows[HTML_INDEX].h - 20;
-	if (windows[HTML_INDEX].y < 0)
-		windows[HTML_INDEX].y = 0;
-	windows[HTML_INDEX].title = "WEBKIT";
-	windows[HTML_INDEX].body = rgb(8, 14, 26);
-	windows[HTML_INDEX].bar = rgb(38, 92, 120);
-	windows[HTML_INDEX].kind = WIN_HTML;
+	html_window = wm_add(&html_ops, "WEBKIT", rgb(8, 14, 26),
+			     rgb(38, 92, 120), NULL);
+	if (!html_window)
+		return;
+
+	html_window->w = screen_w / 2 - 120;
+	if (html_window->w < 300)
+		html_window->w = screen_w - 40;
+	if (html_window->w > 560)
+		html_window->w = 560;
+	html_window->h = html_window->w * 9 / 13;
+	if (html_window->h > screen_h - 80)
+		html_window->h = screen_h - 80;
+	html_window->x = screen_w - html_window->w - 40;
+	if (html_window->x < 0)
+		html_window->x = 0;
+	html_window->y = screen_h - html_window->h - 20;
+	if (html_window->y < 0)
+		html_window->y = 0;
+}
+
+/*
+ * 最初のフレームを出し終えたことを init に知らせる。init はこのファイルを
+ * 見てからゲスト WebKitGTK レンダラを起動する（gradient が先、WebKit が後）。
+ */
+static void signal_gradient_ready(void)
+{
+	int fd = open(ZH_GRADIENT_READY_PATH,
+		      O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+	if (fd < 0) {
+		printf("gradient: ready file open failed errno=%d\n", errno);
+		return;
+	}
+	(void)write(fd, "1\n", 2);
+	close(fd);
+	printf("gradient: ready -> %s\n", ZH_GRADIENT_READY_PATH);
 }
 
 int main(void)
@@ -1596,7 +1738,6 @@ int main(void)
 	struct timespec tick;
 	int tty;
 	int mouse_retries = 0;
-	int html_poll = 0;
 
 	fb = open_framebuffer();
 	if (!fb)
@@ -1648,9 +1789,9 @@ int main(void)
 	       mouse_fd >= 0 ? "ready" : "not found (retrying)");
 	printf("gradient: drag title bar / q to quit\n");
 
-	layout_windows();
+	desktop_create();
 	prepare_html_cache();
-	html_input_update();
+	wm_pointer_update();
 	build_background();
 	build_scene();
 	blit_full();
@@ -1658,6 +1799,7 @@ int main(void)
 	cursor_show();
 	damage_present();
 	scene_dirty = 0;
+	signal_gradient_ready();
 
 	tick.tv_sec = 0;
 	tick.tv_nsec = 10 * 1000 * 1000;
@@ -1678,11 +1820,8 @@ int main(void)
 			break;
 
 		changed = handle_mouse();
-		html_input_update();
-		if (++html_poll >= 10) {
-			html_poll = 0;
-			html_refresh();
-		}
+		wm_pointer_update();
+		wm_tick();
 		if (changed || scene_dirty) {
 			cursor_hide();
 			if (scene_dirty) {

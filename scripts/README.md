@@ -16,7 +16,7 @@ scripts/
 ├── guest/                 # ゲスト (Linux) 側で動くもの
 │   ├── init               #   PID 1 (busybox sh, rootfs マウント / live renderer 管理)
 │   ├── patch-rootfs.sh    #   rootfs.img の /opt/zhibox を差分更新する一時 init
-│   ├── fb-gradient.c      #   framebuffer デモ (マウス + 簡易ウィンドウ + hover 入力)
+│   ├── fb-gradient.c      #   framebuffer デモ (window_ops 方式の簡易 WM + hover 入力)
 │   ├── zh_font.c/.h       #   TrueType パーサ / ラスタライザ (自前実装)
 │   ├── zh_png.c/.h        #   PNG デコーダ / inflate (自前実装)
 │   ├── web/index.html     #   ゲスト WebKitGTK で描画する HTML+CSS (JS なし)
@@ -45,6 +45,10 @@ scripts/
 
 ルートの `build.sh` が差分ビルド + QEMU 起動の入口です。`kernel/`・`scripts/guest/`・
 `scripts/guest/web/` の変更を検出し、必要な成果物だけを作り直します。
+
+GUI 起動では `gradient` が先に立ち上がり、`/tmp/gradient.ready` を書いた後に
+`init` がゲスト WebKitGTK を起動します。`gradient` のウィンドウは
+`window_ops`（draw / tick / pointer）を `wm_add()` で登録する方式です。
 
 ## 置き場所の判断
 

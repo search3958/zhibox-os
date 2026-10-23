@@ -132,6 +132,9 @@ bash scripts/boot-gui.sh
 ```
 
 GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起動します。
+`gradient` が最初のフレームを描き終えて `/tmp/gradient.ready` を書いたあとに、
+ゲストの WebKitGTK レンダラが起動します（WebKit の初期化待ちで画面が
+ブランクにならないよう、先にウィンドウシステムを表示します）。
 
 - **壁紙**: `wallpaper.png` を画面いっぱい (cover) に縮小表示
 - **文字**: `HarmonyOS_Sans_SC_Regular.ttf` を TrueType レンダリングで描画
@@ -141,6 +144,26 @@ GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起�
 - **hover**: `WEBKIT` ウィンドウ内のカード / ピル / ロゴにマウスを重ねると、
   CSS `:hover` の移動・発光・トランジションがリアルタイムに反映される
 - **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
+
+### ウィンドウシステムの拡張
+
+`fb-gradient.c` のウィンドウ管理は、内容ごとの `window_ops` を登録する方式です。
+
+```c
+struct window_ops {
+    const char *name;
+    void (*draw)(struct window *win, int x, int y, int w, int h);
+    void (*tick)(struct window *win);                 /* 任意: 定期更新 */
+    void (*pointer)(struct window *win, int x, int y, int inside); /* 任意 */
+};
+```
+
+- `wm_add()` でウィンドウを追加（最大 `ZH_WM_MAX_WINDOWS`、現在 8）
+- 描画・重ね順・クリックでの前面化・タイトルバードラッグ・ポインタ通知は
+  ウィンドウマネージャ (`wm_*`) が共通処理
+- 新しい種類のウィンドウは `draw` / 必要なら `tick` / `pointer` を実装し、
+  `desktop_create()` に `wm_add()` を 1 行追加するだけで増やせる
+- `WEBKIT` の hover 入力も `html_ops.pointer` として分離されている
 
 ### GPU アクセラレーション (virtio-gpu)
 
@@ -195,10 +218,12 @@ GUI 起動では QEMU の **virtio-gpu** (`-vga virtio`) を使います。
 ```
 rootfs.img (Debian/Ubuntu + WebKitGTK + Xvfb)  -- IDE /dev/sda
         |
-        +-- guest init: ext4 を ro マウント -> chroot (GUI では常駐)
-              +-- launch.sh: Xvfb :99 + dbus-run-session
-                    +-- WebKitGTK (JavaScript OFF) -> /out/html.raw
-                    +-- /out/html.version を原子的に更新
+        +-- guest init
+              +-- fb-gradient を先に起動 -> /tmp/gradient.ready
+              +-- ready 後: ext4 を ro マウント -> chroot (GUI では常駐)
+                    +-- launch.sh: Xvfb :99 + dbus-run-session
+                          +-- WebKitGTK (JavaScript OFF) -> /out/html.raw
+                          +-- /out/html.version を原子的に更新
         |
         +-- /out は initramfs の /tmp に bind
               +-- fb-gradient: バイリニア縮小 -> /dev/fb0 の WEBKIT ウィンドウ
@@ -216,10 +241,11 @@ rootfs.img (Debian/Ubuntu + WebKitGTK + Xvfb)  -- IDE /dev/sda
   ゲスト側の `render-html.py` が `libXtst` の XTEST で Xvfb のポインタを動かします。
   WebKit が `:hover` を再評価して raw を書き直し、`/tmp/html.version` の
   フレーム番号が変わったときだけ `fb-gradient` が raw を読み直します
-- **実行タイミング**: GUI 起動ではレンダラを常駐させ、hover のたびに更新します。
-  シリアル起動では従来どおり 1 枚だけ描画して終了します。ページを変更したら
-  rootfs を作り直してください（カーネルの再ビルドは不要）
-- **rootfs が無い場合**: `WEBKIT` ウィンドウは `HTML RENDER UNAVAILABLE` の
+- **実行タイミング**: GUI 起動では `gradient` の初期化後にレンダラを常駐させ、
+  hover のたびに更新します。シリアル起動では従来どおり 1 枚だけ描画して終了します。
+  ページを変更したら `sh build.sh` が rootfs の `/opt/zhibox` を差分更新します
+  （カーネル・rootfs の再作成は不要）
+- **rootfs が無い場合**: `WEBKIT` ウィンドウは `HTML RENDER WAITING` の
   プレースホルダーになります。ホスト側で代わりに描画することはしません
 
 #### 1. ゲスト rootfs を作る (初回のみ)

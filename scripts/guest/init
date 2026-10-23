@@ -12,6 +12,7 @@ mount -t tmpfs    tmpfs    /tmp   2>/dev/null
 # これにより CSS :hover がリアルタイムに反映される。
 GUEST_ROOT=/mnt/root
 GUEST_PID=""
+GRADIENT_PID=""
 GUEST_MOUNTED=0
 
 guest_mount() {
@@ -143,6 +144,38 @@ stop_guest_html_live() {
 	guest_umount
 }
 
+# GUI: gradient を先に起動し、最初のフレームが出たことを /tmp/gradient.ready
+# で確認してから WebKitGTK レンダラを起動する。
+start_gradient_and_html() {
+	GRADIENT_PID=""
+
+	rm -f /tmp/gradient.ready
+	echo "gradient: starting (guest WebKit follows)"
+	/bin/gradient &
+	GRADIENT_PID=$!
+
+	i=0
+	while [ "$i" -lt 300 ]; do
+		[ -s /tmp/gradient.ready ] && break
+		kill -0 "$GRADIENT_PID" 2>/dev/null || break
+		i=$((i + 1))
+		sleep 0.1
+	done
+
+	if [ -s /tmp/gradient.ready ]; then
+		echo "gradient: ready -> starting guest WebKit"
+		start_guest_html_live || true
+	else
+		echo "gradient: ready timeout (guest WebKit not started)"
+	fi
+
+	wait "$GRADIENT_PID" 2>/dev/null
+	GRADIENT_PID=""
+	echo "gradient: exited"
+	stop_guest_html_live
+	rm -f /tmp/gradient.ready
+}
+
 echo
 echo "=============================================="
 echo "  openEuler kernel boot test"
@@ -162,11 +195,11 @@ fi
 if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
 	echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
 	if grep -q zh_html_root /proc/cmdline 2>/dev/null; then
-		start_guest_html_live || true
+		start_gradient_and_html
+	else
+		/bin/gradient
+		echo "(framebuffer demo finished)"
 	fi
-	/bin/gradient
-	echo "(framebuffer demo finished)"
-	stop_guest_html_live
 elif grep -q zh_html_root /proc/cmdline 2>/dev/null; then
 	render_guest_html || true
 fi

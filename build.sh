@@ -144,6 +144,15 @@ INITRAMFS_INPUTS=(
   "$REPO_ROOT/scripts/guest/HarmonyOS_Sans_SC_Regular.ttf"
   "$REPO_ROOT/scripts/guest/wallpaper.png"
   "$REPO_ROOT/scripts/host/darwin/linux-shim"
+  "$REPO_ROOT/scripts/build-warp4.sh"
+  "$REPO_ROOT/scripts/guest/warp4"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-warp4"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-core"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-font"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-graphics"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/stb_truetype_rust"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/files/data/fonts"
+  "${BARAM_OS:-$REPO_ROOT/../baram-os}/files/data/ui/check-icon.svg"
 )
 
 # ------------------------------------------------------------------ rootfs

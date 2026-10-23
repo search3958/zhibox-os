@@ -1,0 +1,12 @@
+[package]
+name = "zhibox-warp4"
+version = "0.1.0"
+edition = "2021"
+description = "Linux host runner for native Warp 4 application archives"
+
+[dependencies]
+baram-warp4 = { path = "../crates/baram-warp4", default-features = false, features = ["ttf"] }
+baram-core = { path = "../crates/baram-core", default-features = false, features = ["linux"] }
+baram-font = { path = "../crates/baram-font", default-features = false, features = ["ttf"] }
+baram-bsd = { path = "../crates/baram-bsd" }
+libc = "0.2"

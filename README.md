@@ -133,14 +133,17 @@ bash scripts/boot-gui.sh
 
 GUI 起動時はフレームバッファのデモ (`gradient`) が自動で起動します。
 `gradient` が最初のフレームを描き終えて `/tmp/gradient.ready` を書いたあとに、
-ゲストの WebKitGTK レンダラが起動します（WebKit の初期化待ちで画面が
-ブランクにならないよう、先にウィンドウシステムを表示します）。
+ネイティブ Warp 4 ランナーとゲストの WebKitGTK レンダラが起動します
+（WebKit の初期化待ちで画面がブランクにならないよう、先にウィンドウシステムを
+表示します）。Warp 4 は rootfs が無くても起動し、WebKit は rootfs がある場合だけ
+起動します。
 
 - **壁紙**: `wallpaper.png` を画面いっぱい (cover) に縮小表示
 - **文字**: `HarmonyOS_Sans_SC_Regular.ttf` を TrueType レンダリングで描画
 - **マウス**: QEMU ウィンドウ内をクリックしてポインタをグラブ（PS/2 マウス）
 - **ウィンドウ**: タイトルバーをドラッグで移動、クリックで最前面へ
-- **HTML+CSS**: 4 番目の `WEBKIT` ウィンドウに表示（ゲスト Linux の WebKitGTK / JavaScript 無効）
+- **HTML+CSS**: `WEBKIT` ウィンドウに表示（ゲスト Linux の WebKitGTK / JavaScript 無効）
+- **Warp 4**: `WARP4` ウィンドウにネイティブ `.w4a` アプリ（既定は電卓）を表示
 - **hover**: `WEBKIT` ウィンドウ内のカード / ピル / ロゴにマウスを重ねると、
   CSS `:hover` の移動・発光・トランジションがリアルタイムに反映される
 - **終了**: `q` / `Esc` / `Ctrl+C` でデモを終了し、busybox シェルに戻る
@@ -247,6 +250,41 @@ rootfs.img (Debian/Ubuntu + WebKitGTK + Xvfb)  -- IDE /dev/sda
   （カーネル・rootfs の再作成は不要）
 - **rootfs が無い場合**: `WEBKIT` ウィンドウは `HTML RENDER WAITING` の
   プレースホルダーになります。ホスト側で代わりに描画することはしません
+
+### Warp 4 ウィンドウ (ネイティブ XML / スクリプト実行)
+
+`WARP4` ウィンドウは、HTML に変換せず **baram-os のネイティブ Warp 4 エンジン**で
+`.w4a` アプリを実行します。`.w4a` は `main.w4u` (XML レイアウト)、`main.w4s`
+(スクリプト)、`config.ini` を格納した TAR アーカイブです。
+
+```
+baram-os/crates/baram-warp4  --(scripts/build-warp4.sh)-->  output/warp4/zhibox-warp4
+                                                           output/warp4/apps/*.w4a
+        |
+        +-- ゲスト init: BARAM_ROOT=/usr/share/zhibox /bin/warp4 calc.w4a
+              +-- /tmp/warp4.raw      RGBA フレーム (WEBKIT と同じ ZHRAW1 形式)
+              +-- /tmp/warp4.version  u32 フレーム番号
+              +-- /tmp/warp4.input    x y button (button は 0/1)
+        |
+        +-- fb-gradient: バイリニア縮小 -> WARP4 ウィンドウ
+              +-- マウス座標と左ボタン状態を /tmp/warp4.input へ転送
+```
+
+- **ビルド依存**: 参照実装の `../baram-os` が必要です。別の場所に置いた場合は
+  `BARAM_OS=/path/to/baram-os sh scripts/build-warp4.sh` を実行してください。
+  Rust の `x86_64-unknown-linux-musl` ターゲットが無ければ自動で追加します
+- **成果物**: `output/warp4/zhibox-warp4` (静的 musl、約 11MB) と
+  `output/warp4/apps/calc.w4a`。`build-initramfs.sh` が `bin/warp4` と
+  `/usr/share/zhibox/apps/` に同梱します
+- **Linux 互換 shim**: `scripts/guest/warp4/baram-bsd/` が、baram-os の
+  UEFI 前提 `baram-bsd` を Linux の通常ファイル I/O に置き換えます。
+  `config.xml` もこの shim に同梱されます
+- **起動順**: `gradient` の準備完了後に Warp 4 → WebKit の順で起動します。
+  Warp 4 は rootfs.img が無くても動作し、WebKit だけがプレースホルダーになります
+- **アプリの追加**: `baram-os/files/app/<name>.w4a` を用意し、
+  `WARP4_APPS="calc.w4a <name>.w4a" sh scripts/build-warp4.sh` で同梱できます。
+  起動アプリを変える場合は `scripts/guest/init` の `/bin/warp4 calc.w4a` を
+  書き換えてください
 
 #### 1. ゲスト rootfs を作る (初回のみ)
 
@@ -400,12 +438,13 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
 | `scripts/build-rootfs.sh` | ゲスト Linux 用 rootfs.img (WebKitGTK + Xvfb) を生成。macOS は QEMU ゲスト内 apt に分岐 |
 | `scripts/build-rootfs-guest.sh` | macOS 専用: Ubuntu base + QEMU ゲストで rootfs.img を生成 |
-| `scripts/build-initramfs.sh` | busybox + gradient の initramfs を生成 (HTML raw は同梱しない) |
+| `scripts/build-warp4.sh` | baram-os の Warp 4 エンジンから静的 Linux ランナーと `.w4a` アプリを生成 |
+| `scripts/build-initramfs.sh` | busybox + gradient + Warp 4 ランナーの initramfs を生成 (HTML raw は同梱しない) |
 | `scripts/boot-qemu.sh` | QEMU 起動。rootfs.img があれば IDE 接続してゲスト描画を有効化 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |
 | `scripts/lib/common.sh` | OS 判定 (WSL/macOS)・パス・ツール検出の共通処理 |
 | `scripts/guest/patch-rootfs.sh` | rootfs.img の `/opt/zhibox` だけを更新する一時 init (web 差分反映用) |
-| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / `web/render-html.py` / `web/launch.sh` / フォント・壁紙アセット |
+| `scripts/guest/` | **ゲスト (Linux) 側**で動くもの: `init` (PID 1) / `fb-gradient.c` / `zh_font.*` (TrueType) / `zh_png.*` (PNG) / `web/index.html` / `web/render-html.py` / `web/launch.sh` / `warp4/` (ネイティブランナー) / フォント・壁紙アセット |
 | `scripts/host/darwin/` | **macOS 専用**: ホスト用ヘッダ (`elf.h` 等) / `linux-shim/` |
 | `scripts/host/wsl/` | **WSL 専用**: NTFS・大文字小文字衝突まわりの補助 |
 | `scripts/tools/` | ホスト共通ツール: `k.sh` / `case-collision-report.sh` |

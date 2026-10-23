@@ -67,6 +67,8 @@ struct window_manager {
 
 static struct window_manager wm;
 static struct window *html_window;
+static struct window *warp4_window;
+static int mouse_left_down;
 
 static uint8_t *fb;
 static uint8_t *background;
@@ -100,6 +102,10 @@ static int tty_raw;
 #define ZH_HTML_VERSION_PATH	"/tmp/html.version"
 #define ZH_HTML_INPUT_PATH	"/tmp/html.input"
 #define ZH_HTML_INPUT_TMP	"/tmp/.html.input.tmp"
+#define ZH_WARP4_PATH		"/tmp/warp4.raw"
+#define ZH_WARP4_VERSION_PATH	"/tmp/warp4.version"
+#define ZH_WARP4_INPUT_PATH	"/tmp/warp4.input"
+#define ZH_WARP4_INPUT_TMP	"/tmp/.warp4.input.tmp"
 
 static struct zh_font ui_font;
 static int font_ready;
@@ -116,7 +122,13 @@ static uint8_t text_mask[128 * 128];
  * ドラッグのたびに 640x400 から縮小しないよう、フレーム更新時だけ変換する。
  * ZH_HTML_FALLBACK はデバッグ用に明示的に埋め込んだ raw だけを読む。
  */
-struct html_surface {
+struct raw_surface {
+	const char *label;
+	const char *path;
+	const char *fallback;
+	const char *version_path;
+	const char *input_path;
+	const char *input_tmp;
 	uint8_t *data;
 	size_t data_size;
 	uint32_t version;
@@ -131,12 +143,34 @@ struct html_surface {
 	int scaled_h;
 	int off_x;
 	int off_y;
+	int input_last_x;
+	int input_last_y;
+	int input_last_button;
+	int poll;
 };
 
-static struct html_surface html_view;
-static int html_input_last_x = -100000;
-static int html_input_last_y = -100000;
-static int html_poll;
+static struct raw_surface html_view = {
+	.label = "html",
+	.path = ZH_HTML_PATH,
+	.fallback = ZH_HTML_FALLBACK,
+	.version_path = ZH_HTML_VERSION_PATH,
+	.input_path = ZH_HTML_INPUT_PATH,
+	.input_tmp = ZH_HTML_INPUT_TMP,
+	.input_last_x = -100000,
+	.input_last_y = -100000,
+	.input_last_button = -1,
+};
+
+static struct raw_surface warp4_view = {
+	.label = "warp4",
+	.path = ZH_WARP4_PATH,
+	.version_path = ZH_WARP4_VERSION_PATH,
+	.input_path = ZH_WARP4_INPUT_PATH,
+	.input_tmp = ZH_WARP4_INPUT_TMP,
+	.input_last_x = -100000,
+	.input_last_y = -100000,
+	.input_last_button = -1,
+};
 
 /* ------------------------------------------------------------ DRM 加速
  *
@@ -905,8 +939,10 @@ static void clamp_mouse(void)
 
 static void mouse_press(void)
 {
-	struct window *win = wm_at(mouse_x, mouse_y);
+	struct window *win;
 
+	mouse_left_down = 1;
+	win = wm_at(mouse_x, mouse_y);
 	if (!win)
 		return;
 
@@ -920,6 +956,7 @@ static void mouse_press(void)
 
 static void mouse_release(void)
 {
+	mouse_left_down = 0;
 	mouse_grab = NULL;
 }
 
@@ -1133,18 +1170,18 @@ static uint32_t raw_le32(const uint8_t *p)
 	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static int html_raw_load(void)
+static int raw_load(struct raw_surface *view)
 {
 	static const uint8_t magic[8] = {'Z', 'H', 'R', 'A', 'W', '1', 0, 0};
 	size_t size = 0;
-	uint8_t *data = read_file(ZH_HTML_PATH, &size);
+	uint8_t *data = read_file(view->path, &size);
 	uint32_t width;
 	uint32_t height;
 	uint32_t format;
 	uint32_t stride;
 
-	if (!data)
-		data = read_file(ZH_HTML_FALLBACK, &size);
+	if (!data && view->fallback)
+		data = read_file(view->fallback, &size);
 	if (!data)
 		return -1;
 	if (size < 24 || memcmp(data, magic, sizeof(magic)) != 0)
@@ -1161,15 +1198,15 @@ static int html_raw_load(void)
 	if (size < 24 + (size_t)stride * height)
 		goto invalid;
 
-	if (html_view.data)
-		release_buffer(html_view.data, html_view.data_size);
-	html_view.data = data;
-	html_view.data_size = size;
-	html_view.rgba = data + 24;
-	html_view.src_w = (int)width;
-	html_view.src_h = (int)height;
-	html_view.stride = (int)stride;
-	html_view.raw_ok = 1;
+	if (view->data)
+		release_buffer(view->data, view->data_size);
+	view->data = data;
+	view->data_size = size;
+	view->rgba = data + 24;
+	view->src_w = (int)width;
+	view->src_h = (int)height;
+	view->stride = (int)stride;
+	view->raw_ok = 1;
 	return 0;
 
 invalid:
@@ -1177,9 +1214,9 @@ invalid:
 	return -1;
 }
 
-static void prepare_html_cache(void)
+static void prepare_raw_cache(struct raw_surface *view,
+			      const struct window *window)
 {
-	const struct window *window = html_window;
 	int max_w;
 	int max_h;
 	int dw;
@@ -1190,7 +1227,7 @@ static void prepare_html_cache(void)
 	int old_h = 0;
 	uint32_t *scaled;
 
-	if (!window || !html_view.raw_ok)
+	if (!window || !view->raw_ok)
 		return;
 
 	max_w = window->w - 4 * BORDER - 12;
@@ -1199,14 +1236,14 @@ static void prepare_html_cache(void)
 		return;
 
 	/* アスペクト比を保って本文にフィットさせる */
-	if ((long)max_w * html_view.src_h <= (long)max_h * html_view.src_w) {
+	if ((long)max_w * view->src_h <= (long)max_h * view->src_w) {
 		dw = max_w;
-		dh = (html_view.src_h * dw + html_view.src_w / 2) /
-		     html_view.src_w;
+		dh = (view->src_h * dw + view->src_w / 2) /
+		     view->src_w;
 	} else {
 		dh = max_h;
-		dw = (html_view.src_w * dh + html_view.src_h / 2) /
-		     html_view.src_h;
+		dw = (view->src_w * dh + view->src_h / 2) /
+		     view->src_h;
 	}
 	if (dw <= 0 || dh <= 0)
 		return;
@@ -1214,15 +1251,15 @@ static void prepare_html_cache(void)
 	scaled = (uint32_t *)alloc_buffer((size_t)dw * dh *
 					  sizeof(*scaled));
 	if (!scaled) {
-		printf("gradient: html cache allocation failed\n");
+		printf("gradient: %s cache allocation failed\n", view->label);
 		return;
 	}
-	old_w = html_view.scaled_w;
-	old_h = html_view.scaled_h;
+	old_w = view->scaled_w;
+	old_h = view->scaled_h;
 
 	/* 8.8 固定小数点のバイリニア補間 */
 	for (y = 0; y < dh; y++) {
-		int fy = ((2 * y + 1) * html_view.src_h * 256) / (2 * dh) - 128;
+		int fy = ((2 * y + 1) * view->src_h * 256) / (2 * dh) - 128;
 		int y0;
 		int y1;
 		int wy;
@@ -1234,16 +1271,16 @@ static void prepare_html_cache(void)
 		y0 = fy >> 8;
 		wy = fy & 255;
 		y1 = y0 + 1;
-		if (y1 >= html_view.src_h) {
-			y1 = html_view.src_h - 1;
+		if (y1 >= view->src_h) {
+			y1 = view->src_h - 1;
 			y0 = y1;
 			wy = 0;
 		}
-		row0 = html_view.rgba + (size_t)y0 * html_view.stride;
-		row1 = html_view.rgba + (size_t)y1 * html_view.stride;
+		row0 = view->rgba + (size_t)y0 * view->stride;
+		row1 = view->rgba + (size_t)y1 * view->stride;
 
 		for (x = 0; x < dw; x++) {
-			int fx = ((2 * x + 1) * html_view.src_w * 256) /
+			int fx = ((2 * x + 1) * view->src_w * 256) /
 				 (2 * dw) - 128;
 			int x0;
 			int x1;
@@ -1265,8 +1302,8 @@ static void prepare_html_cache(void)
 			x0 = fx >> 8;
 			wx = fx & 255;
 			x1 = x0 + 1;
-			if (x1 >= html_view.src_w) {
-				x1 = html_view.src_w - 1;
+			if (x1 >= view->src_w) {
+				x1 = view->src_w - 1;
 				x0 = x1;
 				wx = 0;
 			}
@@ -1291,25 +1328,25 @@ static void prepare_html_cache(void)
 		}
 	}
 
-	if (html_view.scaled)
-		release_buffer(html_view.scaled, html_view.scaled_bytes);
-	html_view.scaled = scaled;
-	html_view.scaled_bytes = (size_t)dw * dh * sizeof(*scaled);
-	html_view.scaled_w = dw;
-	html_view.scaled_h = dh;
-	html_view.off_x = (max_w - dw) / 2;
-	html_view.off_y = (max_h - dh) / 2;
+	if (view->scaled)
+		release_buffer(view->scaled, view->scaled_bytes);
+	view->scaled = scaled;
+	view->scaled_bytes = (size_t)dw * dh * sizeof(*scaled);
+	view->scaled_w = dw;
+	view->scaled_h = dh;
+	view->off_x = (max_w - dw) / 2;
+	view->off_y = (max_h - dh) / 2;
 	if (old_w != dw || old_h != dh)
-		printf("gradient: html %dx%d -> %dx%d (raw RGBA)\n",
-		       html_view.src_w, html_view.src_h, dw, dh);
+		printf("gradient: %s %dx%d -> %dx%d (raw RGBA)\n",
+		       view->label, view->src_w, view->src_h, dw, dh);
 }
 
 /* レンダラが書く 4 バイトのフレーム番号。raw の再読み込み判定だけに使う。 */
-static uint32_t html_version_read(void)
+static uint32_t raw_version_read(const struct raw_surface *view)
 {
-	uint32_t version = html_view.version;
+	uint32_t version = view->version;
 	size_t size = 0;
-	uint8_t *data = read_file(ZH_HTML_VERSION_PATH, &size);
+	uint8_t *data = read_file(view->version_path, &size);
 
 	if (data) {
 		if (size >= 4)
@@ -1319,28 +1356,28 @@ static uint32_t html_version_read(void)
 	return version;
 }
 
-static void html_refresh(void)
+static void raw_refresh(struct raw_surface *view, const struct window *window)
 {
-	uint32_t version = html_version_read();
+	uint32_t version = raw_version_read(view);
 
-	if (version == html_view.version)
+	if (version == view->version)
 		return;
 
-	if (html_raw_load() == 0) {
-		html_view.version = version;
-		prepare_html_cache();
+	if (raw_load(view) == 0) {
+		view->version = version;
+		prepare_raw_cache(view, window);
 		scene_dirty = 1;
-		printf("gradient: html frame %u\n", version);
+		printf("gradient: %s frame %u\n", view->label, version);
 	} else {
 		/* 壊れたフレームで毎回リトライしないよう、番号だけ進める。 */
-		html_view.version = version;
+		view->version = version;
 	}
 }
 
 /*
- * fb-gradient 側のマウス位置を WebKit の 640x400 座標へ変換し、
- * /tmp/html.input に書く。ゲスト側の render-html.py が XTEST で
- * ポインタを動かし、CSS :hover を発火させる。
+ * fb-gradient 側のマウス位置を raw サーフェスの座標へ変換し、
+ * /tmp/html.input または /tmp/warp4.input に書く。WebKit 側は
+ * XTEST でポインタを動かし、Warp4 側はクリック状態も受け取る。
  */
 static char *append_int(char *out, int value)
 {
@@ -1363,27 +1400,31 @@ static char *append_int(char *out, int value)
 	return out;
 }
 
-static void html_input_write(int x, int y)
+static void raw_input_write(struct raw_surface *view, int x, int y, int button)
 {
-	char buffer[32];
+	char buffer[48];
 	char *end = buffer;
 	int fd;
 
-	if (x == html_input_last_x && y == html_input_last_y)
+	if (x == view->input_last_x && y == view->input_last_y &&
+	    button == view->input_last_button)
 		return;
-	html_input_last_x = x;
-	html_input_last_y = y;
+	view->input_last_x = x;
+	view->input_last_y = y;
+	view->input_last_button = button;
 
-	fd = open(ZH_HTML_INPUT_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	fd = open(view->input_tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (fd < 0)
 		return;
 	end = append_int(end, x);
 	*end++ = ' ';
 	end = append_int(end, y);
+	*end++ = ' ';
+	end = append_int(end, button);
 	*end++ = '\n';
 	(void)write(fd, buffer, (size_t)(end - buffer));
 	close(fd);
-	(void)rename(ZH_HTML_INPUT_TMP, ZH_HTML_INPUT_PATH);
+	(void)rename(view->input_tmp, view->input_path);
 }
 
 /* --------------------------------------------------------- window contents */
@@ -1412,28 +1453,34 @@ static void gradient_content_draw(struct window *win, int x, int y, int w, int h
 	rect_outline(scene, x, y, swatch_w, swatch_h, rgb(12, 16, 28));
 }
 
-static void html_content_draw(struct window *win, int x, int y, int w, int h)
+static void raw_content_draw(struct window *win, int x, int y, int w, int h)
 {
-	int bx = x + html_view.off_x;
-	int by = y + html_view.off_y;
+	struct raw_surface *view = win->data;
+	int bx;
+	int by;
 
-	(void)win;
-	if (html_view.scaled) {
+	if (!view)
+		return;
+	bx = x + view->off_x;
+	by = y + view->off_y;
+
+	if (view->scaled) {
 		int row;
 		int column;
 
-		for (row = 0; row < html_view.scaled_h; row++)
-			for (column = 0; column < html_view.scaled_w; column++)
+		for (row = 0; row < view->scaled_h; row++)
+			for (column = 0; column < view->scaled_w; column++)
 				put_pixel(scene, bx + column, by + row,
-					  html_view.scaled[
+					  view->scaled[
 						  (size_t)row *
-							  html_view.scaled_w +
+							  view->scaled_w +
 						  column]);
 		rect_outline(scene, bx - 1, by - 1,
-			     html_view.scaled_w + 2, html_view.scaled_h + 2,
+			     view->scaled_w + 2, view->scaled_h + 2,
 			     rgb(96, 128, 152));
 	} else {
-		const char *message = "HTML RENDER WAITING";
+		const char *message = view->label[0] == 'h' ?
+			"HTML RENDER WAITING" : "WARP4 RENDER WAITING";
 		int tw = ui_text_width(message, 16);
 
 		ui_text(scene, x + (w - tw) / 2, y + (h - 16) / 2,
@@ -1441,39 +1488,49 @@ static void html_content_draw(struct window *win, int x, int y, int w, int h)
 	}
 }
 
-static void html_content_tick(struct window *win)
+static void raw_content_tick(struct window *win)
 {
-	(void)win;
-	if (++html_poll < 10)
+	struct raw_surface *view = win->data;
+
+	if (!view)
 		return;
-	html_poll = 0;
-	html_refresh();
+	if (++view->poll < 10)
+		return;
+	view->poll = 0;
+	raw_refresh(view, win);
 }
 
-static void html_content_pointer(struct window *win, int x, int y, int inside)
+static void raw_content_pointer(struct window *win, int x, int y, int inside)
 {
-	int left = win->x + 2 * BORDER + 6 + html_view.off_x;
-	int top = win->y + TITLE_H + 2 * BORDER + 6 + html_view.off_y;
+	struct raw_surface *view = win->data;
+	int left;
+	int top;
 	int sx = -1;
 	int sy = -1;
 
-	if (inside && html_view.scaled && html_view.scaled_w > 0 &&
-	    html_view.scaled_h > 0 &&
-	    x >= left && x < left + html_view.scaled_w &&
-	    y >= top && y < top + html_view.scaled_h) {
-		sx = (x - left) * html_view.src_w / html_view.scaled_w;
-		sy = (y - top) * html_view.src_h / html_view.scaled_h;
+	if (!view)
+		return;
+	left = win->x + 2 * BORDER + 6 + view->off_x;
+	top = win->y + TITLE_H + 2 * BORDER + 6 + view->off_y;
+
+	if (inside && view->scaled && view->scaled_w > 0 &&
+	    view->scaled_h > 0 &&
+	    x >= left && x < left + view->scaled_w &&
+	    y >= top && y < top + view->scaled_h) {
+		sx = (x - left) * view->src_w / view->scaled_w;
+		sy = (y - top) * view->src_h / view->scaled_h;
 		if (sx < 0)
 			sx = 0;
 		if (sy < 0)
 			sy = 0;
-		if (sx >= html_view.src_w)
-			sx = html_view.src_w - 1;
-		if (sy >= html_view.src_h)
-			sy = html_view.src_h - 1;
+		if (sx >= view->src_w)
+			sx = view->src_w - 1;
+		if (sy >= view->src_h)
+			sy = view->src_h - 1;
 	}
 
-	html_input_write(sx, sy);
+	raw_input_write(view, sx, sy,
+			sx >= 0 && sy >= 0 ? mouse_left_down : 0);
 }
 
 struct text_content {
@@ -1509,9 +1566,16 @@ static const struct window_ops text_ops = {
 
 static const struct window_ops html_ops = {
 	.name = "html",
-	.draw = html_content_draw,
-	.tick = html_content_tick,
-	.pointer = html_content_pointer,
+	.draw = raw_content_draw,
+	.tick = raw_content_tick,
+	.pointer = raw_content_pointer,
+};
+
+static const struct window_ops warp4_ops = {
+	.name = "warp4",
+	.draw = raw_content_draw,
+	.tick = raw_content_tick,
+	.pointer = raw_content_pointer,
 };
 
 
@@ -1641,10 +1705,6 @@ fail:
 	drm_fd = -1;
 }
 
-static const struct text_content about_content = {
-	.lines = { "Zhibox OS", "OLK-5.10", "FB + EVDEV", "Q TO QUIT" },
-};
-
 static const struct text_content input_content = {
 	.lines = { "MOUSE  : EVDEV", "DRAG   : TITLE",
 		   "RAISE  : CLICK", "EXIT   : Q" },
@@ -1685,9 +1745,10 @@ static void desktop_create(void)
 		     rgb(52, 108, 176), NULL);
 	place_window(win, screen_w / 12, screen_h / 8, w, h);
 
-	win = wm_add(&text_ops, "ABOUT", rgb(34, 42, 58),
-		     rgb(92, 74, 148), (void *)&about_content);
-	place_window(win, screen_w / 2 + screen_w / 20, screen_h / 5, w, h);
+	warp4_window = wm_add(&warp4_ops, "WARP4", rgb(248, 248, 252),
+			      rgb(40, 64, 120), &warp4_view);
+	place_window(warp4_window, screen_w / 2 + screen_w / 20,
+		     screen_h / 5, w, h);
 
 	win = wm_add(&text_ops, "INPUT", rgb(30, 44, 40),
 		     rgb(52, 132, 104), (void *)&input_content);
@@ -1695,7 +1756,7 @@ static void desktop_create(void)
 
 	/* HTML (WebKit) ウィンドウ: 右下に 520x360 程度で配置 */
 	html_window = wm_add(&html_ops, "WEBKIT", rgb(8, 14, 26),
-			     rgb(38, 92, 120), NULL);
+			     rgb(38, 92, 120), &html_view);
 	if (!html_window)
 		return;
 
@@ -1753,12 +1814,18 @@ int main(void)
 	}
 
 	load_assets();
-	if (html_raw_load() == 0)
+	if (raw_load(&html_view) == 0)
 		printf("gradient: html %dx%d (raw RGBA, JS off)\n",
 		       html_view.src_w, html_view.src_h);
 	else
 		printf("gradient: html render unavailable (placeholder)\n");
-	html_view.version = html_version_read();
+	html_view.version = raw_version_read(&html_view);
+	if (raw_load(&warp4_view) == 0)
+		printf("gradient: warp4 %dx%d (native)\n",
+		       warp4_view.src_w, warp4_view.src_h);
+	else
+		printf("gradient: warp4 render unavailable (placeholder)\n");
+	warp4_view.version = raw_version_read(&warp4_view);
 
 	tty = open("/dev/tty0", O_RDWR);
 	if (tty < 0)
@@ -1790,7 +1857,8 @@ int main(void)
 	printf("gradient: drag title bar / q to quit\n");
 
 	desktop_create();
-	prepare_html_cache();
+	prepare_raw_cache(&html_view, html_window);
+	prepare_raw_cache(&warp4_view, warp4_window);
 	wm_pointer_update();
 	build_background();
 	build_scene();

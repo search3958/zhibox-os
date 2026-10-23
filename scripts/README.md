@@ -9,6 +9,7 @@ scripts/
 ├── build-initramfs.sh     # エントリ: initramfs 生成
 ├── build-rootfs.sh        # エントリ: ゲスト WebKitGTK 用 rootfs.img 生成 (Linux/WSL / macOS 分岐)
 ├── build-rootfs-guest.sh  #   macOS: Ubuntu base + QEMU ゲスト内 apt で rootfs.img 生成
+├── build-warp4.sh         # エントリ: baram-os の Warp 4 エンジンから静的 Linux ランナーを生成
 ├── boot-qemu.sh           # エントリ: シリアル起動
 ├── boot-gui.sh            # エントリ: GUI 起動
 ├── lib/
@@ -22,6 +23,9 @@ scripts/
 │   ├── web/index.html     #   ゲスト WebKitGTK で描画する HTML+CSS (JS なし)
 │   ├── web/render-html.py #   ゲスト内で WebKitGTK スナップショット → raw RGBA (live hover 対応)
 │   ├── web/launch.sh      #   ゲスト内で Xvfb + dbus + WebKitGTK を起動 (live フラグ)
+│   ├── warp4/             #   ネイティブ Warp 4 ランナー (baram-warp4 を Linux 向けにビルド)
+│   │   ├── baram-bsd/     #     UEFI 前提の baram-bsd を Linux ファイル I/O に置換する shim
+│   │   └── runner/        #     .w4a を実行し /tmp/warp4.raw 等を公開するエントリ
 │   ├── HarmonyOS_Sans_SC_Regular.ttf  # UI フォント (initramfs へ同梱)
 │   └── wallpaper.png      #   壁紙 (initramfs へ同梱)
 ├── host/                  # ホスト OS に依存するもの
@@ -47,8 +51,10 @@ scripts/
 `scripts/guest/web/` の変更を検出し、必要な成果物だけを作り直します。
 
 GUI 起動では `gradient` が先に立ち上がり、`/tmp/gradient.ready` を書いた後に
-`init` がゲスト WebKitGTK を起動します。`gradient` のウィンドウは
-`window_ops`（draw / tick / pointer）を `wm_add()` で登録する方式です。
+`init` がネイティブ Warp 4 ランナーとゲスト WebKitGTK を起動します。`gradient` の
+ウィンドウは `window_ops`（draw / tick / pointer）を `wm_add()` で登録する方式です。
+Warp 4 の `.w4a` アプリは `scripts/build-warp4.sh` で生成し、`initramfs` の
+`/usr/share/zhibox/apps/` に同梱されます。
 
 ## 置き場所の判断
 

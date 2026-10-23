@@ -23,6 +23,19 @@ cp "$REPO_ROOT/scripts/guest/HarmonyOS_Sans_SC_Regular.ttf" \
 cp "$REPO_ROOT/scripts/guest/wallpaper.png" \
    "$INITRAMFS/usr/share/zhibox/wallpaper.png"
 
+# Native Warp 4 runner (static x86_64 musl).  The engine is built from the
+# sibling baram-os reference tree; a failed build only leaves the WARP4
+# window in its placeholder state.
+if [ -x "$REPO_ROOT/scripts/build-warp4.sh" ]; then
+  if "$REPO_ROOT/scripts/build-warp4.sh"; then
+    install -m 0755 "$OUT/warp4/zhibox-warp4" "$INITRAMFS/bin/warp4"
+    mkdir -p "$INITRAMFS/usr/share/zhibox/apps"
+    cp "$OUT/warp4/apps/"*.w4a "$INITRAMFS/usr/share/zhibox/apps/" 2>/dev/null || true
+  else
+    say "Warp4 ランナーのビルドに失敗しました (WARP4 はプレースホルダー)"
+  fi
+fi
+
 # HTML+CSS はゲスト Linux の WebKitGTK が起動時に描画する (scripts/guest/web/)。
 # initramfs には HTML も raw も同梱しない。rootfs.img が無い場合や描画に失敗した
 # 場合は、fb-gradient がプレースホルダーを表示する。

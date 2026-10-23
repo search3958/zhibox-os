@@ -13,6 +13,7 @@ mount -t tmpfs    tmpfs    /tmp   2>/dev/null
 GUEST_ROOT=/mnt/root
 GUEST_PID=""
 GRADIENT_PID=""
+WARP4_PID=""
 GUEST_MOUNTED=0
 
 guest_mount() {
@@ -144,6 +145,58 @@ stop_guest_html_live() {
 	guest_umount
 }
 
+# GUI: native Warp 4 runner.  It publishes RGBA frames to /tmp/warp4.raw and
+# receives pointer/button state from fb-gradient through /tmp/warp4.input.
+start_warp4() {
+	[ -x /bin/warp4 ] || {
+		echo "warp4: runner not present (WARP4 placeholder)"
+		return 1
+	}
+
+	rm -f /tmp/warp4.raw /tmp/warp4.version /tmp/warp4.input /tmp/warp4.stop
+	echo "warp4: starting native app (calc.w4a)"
+	BARAM_ROOT=/usr/share/zhibox /bin/warp4 calc.w4a &
+	WARP4_PID=$!
+
+	i=0
+	while [ "$i" -lt 300 ]; do
+		[ -s /tmp/warp4.raw ] && break
+		kill -0 "$WARP4_PID" 2>/dev/null || break
+		i=$((i + 1))
+		sleep 0.05
+	done
+
+	if [ -s /tmp/warp4.raw ]; then
+		echo "warp4: live ready (pid $WARP4_PID)"
+		return 0
+	fi
+
+	echo "warp4: live render failed"
+	touch /tmp/warp4.stop 2>/dev/null
+	wait "$WARP4_PID" 2>/dev/null
+	WARP4_PID=""
+	return 1
+}
+
+stop_warp4() {
+	touch /tmp/warp4.stop 2>/dev/null
+
+	if [ -n "$WARP4_PID" ]; then
+		i=0
+		while kill -0 "$WARP4_PID" 2>/dev/null && [ "$i" -lt 50 ]; do
+			i=$((i + 1))
+			sleep 0.05
+		done
+		if kill -0 "$WARP4_PID" 2>/dev/null; then
+			kill "$WARP4_PID" 2>/dev/null
+		fi
+		wait "$WARP4_PID" 2>/dev/null
+		WARP4_PID=""
+	fi
+
+	rm -f /tmp/warp4.stop /tmp/warp4.input
+}
+
 # GUI: gradient を先に起動し、最初のフレームが出たことを /tmp/gradient.ready
 # で確認してから WebKitGTK レンダラを起動する。
 start_gradient_and_html() {
@@ -163,15 +216,18 @@ start_gradient_and_html() {
 	done
 
 	if [ -s /tmp/gradient.ready ]; then
+		echo "gradient: ready -> starting native Warp4"
+		start_warp4 || true
 		echo "gradient: ready -> starting guest WebKit"
 		start_guest_html_live || true
 	else
-		echo "gradient: ready timeout (guest WebKit not started)"
+		echo "gradient: ready timeout (guest renderers not started)"
 	fi
 
 	wait "$GRADIENT_PID" 2>/dev/null
 	GRADIENT_PID=""
 	echo "gradient: exited"
+	stop_warp4
 	stop_guest_html_live
 	rm -f /tmp/gradient.ready
 }
@@ -194,12 +250,7 @@ fi
 
 if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
 	echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
-	if grep -q zh_html_root /proc/cmdline 2>/dev/null; then
-		start_gradient_and_html
-	else
-		/bin/gradient
-		echo "(framebuffer demo finished)"
-	fi
+	start_gradient_and_html
 elif grep -q zh_html_root /proc/cmdline 2>/dev/null; then
 	render_guest_html || true
 fi

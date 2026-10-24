@@ -190,6 +190,22 @@ impl TaskbarSurface {
             return;
         }
 
+        if !baram_core::screen::gpu_enabled() {
+            for row in 0..TASKBAR_H {
+                let src = (y + row) * width;
+                let dst = row * width;
+                self.base[dst..dst + width]
+                    .copy_from_slice(&wallpaper.buf_ref()[src..src + width]);
+            }
+            tint_taskbar(
+                &mut self.base,
+                config::get_color("ui-theme/color/taskbar", Color::TASKBAR).0,
+                200,
+            );
+            self.base_valid = true;
+            return;
+        }
+
         blur::blur_region_to_with_scratch(
             wallpaper.buf_ref(),
             &mut self.blurred,

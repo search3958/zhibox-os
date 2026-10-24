@@ -375,8 +375,8 @@ static LINUX_GPU_ENABLED: AtomicBool = AtomicBool::new(true);
 pub fn set_gpu_enabled(enabled: bool) {
     LINUX_GPU_ENABLED.store(enabled, Ordering::Relaxed);
     eprintln!(
-        "desktop: gpu acceleration {}",
-        if enabled { "on (dirty rectangles)" } else { "off (software full-frame)" }
+        "desktop: gpu presentation {}",
+        if enabled { "on (DRM dirty rectangles)" } else { "off (CPU full-frame)" }
     );
 }
 
@@ -684,13 +684,14 @@ replacement = """        // URI command inbox.  Other guest processes (and the i
             let _ = std::fs::remove_file("/tmp/zhibox.uri");
             let uri = uri.trim();
             if uri.starts_with("os://") && baram_bsd::uri::execute(uri, &mut display_state) {
-                // GPU OFF must drop the wallpaper overlay immediately; ON
-                // re-decodes the configured wallpaper image.
-                if !baram_core::screen::gpu_enabled() {
-                    cached_wallpaper = None;
-                } else if let Some(bytes) = WALLPAPERS.get(display_state.wallpaper_index) {
-                    cached_wallpaper = decode_wallpaper(bytes, screen.width(), screen.height());
-                }
+                cached_wallpaper = wallpaper_for_state(
+                    &display_state,
+                    screen.width(),
+                    screen.height(),
+                );
+                wm.set_all_dirty();
+                taskbar_surface.invalidate();
+                cached_launcher_layer = None;
                 bg_cache = None;
                 scene_dirty = true;
                 dirty = true;
@@ -703,59 +704,24 @@ if needle in ri_text:
 else:
     raise SystemExit("desktop: could not patch URI inbox")
 
-# --------------------------------------------------------------- GPU off = solid
-# When `display/gpu/enabled` is 0 the desktop drops the blurred wallpaper and
-# every glass blur pass: the scene background becomes a plain solid colour.
-assets = root / "crates/baram-windowserver/src/compositor_assets.rs"
-text = assets.read_text()
-needle = (
-    "pub fn decode_wallpaper(bytes: &[u8], screen_w: usize, screen_h: usize) "
-    "-> Option<Vec<u32>> {"
-)
-gate = (
-    "pub fn decode_wallpaper(bytes: &[u8], screen_w: usize, screen_h: usize) "
-    "-> Option<Vec<u32>> {\n"
-    "    // GPU OFF: no wallpaper decode; the scene paints a solid colour and\n"
-    "    // the compositor skips every backdrop blur pass.\n"
-    "    if !baram_core::screen::gpu_enabled() {\n"
-    "        return None;\n"
-    "    }"
-)
-if needle in text and "gpu_enabled()" not in text:
-    assets.write_text(text.replace(needle, gate, 1))
-
-surface = root / "crates/baram-windowserver/src/compositor_surface.rs"
-text = surface.read_text()
-needle = "    fn refresh_wallpaper_blur(&mut self, wallpaper: &LayerSystem, y: usize) {"
-gate = (
-    "    fn refresh_wallpaper_blur(&mut self, wallpaper: &LayerSystem, y: usize) {\n"
-    "        // GPU OFF: no glass blur.  The taskbar keeps a flat tinted base.\n"
-    "        if !baram_core::screen::gpu_enabled() {\n"
-    "            let solid = config::get_color(\"ui-theme/color/taskbar\", Color::TASKBAR).0;\n"
-    "            for pixel in self.base.as_mut_slice() {\n"
-    "                *pixel = solid;\n"
-    "            }\n"
-    "            self.base_valid = true;\n"
-    "            return;\n"
-    "        }"
-)
-if needle in text and "gpu_enabled()" not in text:
-    surface.write_text(text.replace(needle, gate, 1))
+# GPU ON uses DRM dirty rectangles. GPU OFF keeps the wallpaper, skips backdrop
+# blur in the vendored compositor, and asks the CPU-rendered framebuffer to
+# refresh the whole screen.
 
 # Refresh the cached wallpaper right after a GPU toggle arrives through the
 # application URI paths (Warp4/HTML app commands).
 import re
 gpu_branch_tpl = (
     '{i}} else if parsed.path == "display/gpu" {\n'
-    '{i}    if baram_core::screen::gpu_enabled() {\n'
-    '{i}        if let Some(bytes) = WALLPAPERS.get(display_state.wallpaper_index) {\n'
-    '{i}            cached_wallpaper = decode_wallpaper(bytes, screen.width(), screen.height());\n'
-    '{i}        }\n'
-    '{i}    } else {\n'
-    '{i}        cached_wallpaper = None;\n'
-    '{i}    }\n'
+    '{i}    cached_wallpaper = wallpaper_for_state(&display_state, screen.width(), screen.height());\n'
+    '{i}    wm.set_all_dirty();\n'
+    '{i}    taskbar_surface.invalidate();\n'
+    '{i}    cached_launcher_layer = None;\n'
+    '{i}    bg_cache = None;\n'
     '{i}    scene_dirty = true;\n'
+    '{i}    dirty = true;\n'
 )
+
 for source, pattern in (
     ("crates/baram-boot/src/runtime_input.rs",
      re.compile(r'(\n)([ ]*)\} else if parsed\n[ ]*\.path\n[ ]*\.starts_with\("display/pointer"\)')),

@@ -477,7 +477,6 @@ fn draw_ime_menu(
         .as_ref()
         .is_none_or(|cache| cache.len() != cache_w * cache_h)
     {
-        const BLUR_RADIUS: usize = 18;
         let mut glass = LayerSystem::new(cache_w, cache_h);
         for py in 0..cache_h {
             let src_start = (cache_y + py) * layer.width() + cache_x;
@@ -485,37 +484,40 @@ fn draw_ime_menu(
             glass.buf_mut()[dst_start..dst_start + cache_w]
                 .copy_from_slice(&layer.buf_ref()[src_start..src_start + cache_w]);
         }
-        let blur_x0 = x.saturating_sub(BLUR_RADIUS);
-        let blur_y0 = y.saturating_sub(BLUR_RADIUS);
-        let blur_x1 = (x + width + BLUR_RADIUS).min(layer.width());
-        let blur_y1 = (y + height + BLUR_RADIUS).min(layer.height());
-        let blur_w = blur_x1.saturating_sub(blur_x0);
-        let blur_h = blur_y1.saturating_sub(blur_y0);
-        if blur_w == 0 || blur_h == 0 {
-            return;
-        }
-        let mut source = alloc::vec![0u32; blur_w * blur_h];
-        for py in 0..blur_h {
-            let src_start = (blur_y0 + py) * layer.width() + blur_x0;
-            let dst_start = py * blur_w;
-            source[dst_start..dst_start + blur_w]
-                .copy_from_slice(&layer.buf_ref()[src_start..src_start + blur_w]);
-        }
-        let mut blurred = alloc::vec![0u32; source.len()];
-        blur::blur_region_to(&source, &mut blurred, blur_w, 0, blur_h, BLUR_RADIUS as i32);
         draw_soft_box_shadow(&mut glass, x - cache_x, y - cache_y, width, height, 18);
-        copy_rounded_region_from_crop(
-            &mut glass,
-            &blurred,
-            blur_w,
-            blur_x0 - cache_x,
-            blur_y0 - cache_y,
-            x - cache_x,
-            y - cache_y,
-            width,
-            height,
-            18,
-        );
+        if baram_core::screen::gpu_enabled() {
+            const BLUR_RADIUS: usize = 18;
+            let blur_x0 = x.saturating_sub(BLUR_RADIUS);
+            let blur_y0 = y.saturating_sub(BLUR_RADIUS);
+            let blur_x1 = (x + width + BLUR_RADIUS).min(layer.width());
+            let blur_y1 = (y + height + BLUR_RADIUS).min(layer.height());
+            let blur_w = blur_x1.saturating_sub(blur_x0);
+            let blur_h = blur_y1.saturating_sub(blur_y0);
+            if blur_w == 0 || blur_h == 0 {
+                return;
+            }
+            let mut source = alloc::vec![0u32; blur_w * blur_h];
+            for py in 0..blur_h {
+                let src_start = (blur_y0 + py) * layer.width() + blur_x0;
+                let dst_start = py * blur_w;
+                source[dst_start..dst_start + blur_w]
+                    .copy_from_slice(&layer.buf_ref()[src_start..src_start + blur_w]);
+            }
+            let mut blurred = alloc::vec![0u32; source.len()];
+            blur::blur_region_to(&source, &mut blurred, blur_w, 0, blur_h, BLUR_RADIUS as i32);
+            copy_rounded_region_from_crop(
+                &mut glass,
+                &blurred,
+                blur_w,
+                blur_x0 - cache_x,
+                blur_y0 - cache_y,
+                x - cache_x,
+                y - cache_y,
+                width,
+                height,
+                18,
+            );
+        }
         blend_rounded_rect(
             &mut glass,
             x - cache_x,

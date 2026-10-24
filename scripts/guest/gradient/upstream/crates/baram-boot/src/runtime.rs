@@ -92,6 +92,9 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
         let setup_wallpaper = wallpaper_for_state(&display_state, setup_w, setup_h);
         NanoSystem::serial_log("baram: setup wallpaper decoded\r\n");
         let setup_background = setup_wallpaper.as_ref().map(|wallpaper| {
+            if !baram_core::screen::gpu_enabled() {
+                return wallpaper.clone();
+            }
             NanoSystem::serial_log("baram: blurring setup wallpaper\r\n");
             let mut blurred = alloc::vec![0u32; setup_w * setup_h];
             let mut scratch = alloc::vec![0u32; setup_w * setup_h];

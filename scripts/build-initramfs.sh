@@ -116,5 +116,7 @@ chmod 0755 "$INITRAMFS/init"
 ( cd "$INITRAMFS" && find . | cpio -o -H newc --quiet | gzip -9 ) > "$INITRD"
 # boot-qemu.sh の既定パス ($OUT/initramfs.cpio.gz) も常に最新にしておく。
 # build-and-boot.sh 経由でなくても、直接の GUI ビルド後にも最新が乗るようにする。
-cp -f "$INITRD" "$OUT/initramfs.cpio.gz"
-ls -lh "$INITRD" "$OUT/initramfs.cpio.gz"
+if [ "$INITRD" != "$OUT/initramfs.cpio.gz" ]; then
+  cp -f "$INITRD" "$OUT/initramfs.cpio.gz"
+fi
+ls -lh "$INITRD"

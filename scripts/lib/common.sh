@@ -25,8 +25,8 @@ zh_os() {
 OS="$(zh_os)"
 
 OUT="$REPO_ROOT/output"
-INITRAMFS="$HOME/initramfs"
-INITRD="$HOME/initramfs.cpio.gz"
+INITRAMFS="${INITRAMFS:-$HOME/initramfs}"
+INITRD="${INITRD:-$HOME/initramfs.cpio.gz}"
 LOG="$HOME/boot.log"
 
 # --------------------------------------------------------------- macOS: ケースセンシティブ領域

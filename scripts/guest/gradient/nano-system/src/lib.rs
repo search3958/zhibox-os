@@ -71,7 +71,10 @@ enum Queued {
 }
 
 struct Device {
+    path: String,
     file: File,
+    abs_max_x: u64,
+    abs_max_y: u64,
 }
 
 #[derive(Default)]
@@ -80,6 +83,10 @@ struct PendingPointer {
     dy: i32,
     scroll: i32,
     changed: bool,
+    absolute_x: Option<u64>,
+    absolute_y: Option<u64>,
+    absolute_max_x: u64,
+    absolute_max_y: u64,
 }
 
 pub struct NanoSystem {
@@ -106,11 +113,25 @@ struct InputEvent {
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
 const EV_REL: u16 = 2;
+const EV_ABS: u16 = 3;
 
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
 const REL_HWHEEL: u16 = 6;
 const REL_WHEEL: u16 = 8;
+const ABS_X: u16 = 0;
+const ABS_Y: u16 = 1;
+
+#[repr(C)]
+#[derive(Default)]
+struct InputAbsInfo {
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+    fuzz: i32,
+    flat: i32,
+    resolution: i32,
+}
 
 const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
@@ -195,9 +216,6 @@ impl NanoSystem {
     }
 
     fn open_devices(&mut self) {
-        if !self.devices.is_empty() {
-            return;
-        }
         let now = Instant::now();
         if self
             .last_open_try
@@ -206,9 +224,13 @@ impl NanoSystem {
             return;
         }
         self.last_open_try = Some(now);
+        let previous_device_count = self.devices.len();
         for index in 0..32 {
-            let path = format!("/dev/input/event{index}");
-            let Ok(path) = CString::new(path) else {
+            let device_path = format!("/dev/input/event{index}");
+            if self.devices.iter().any(|device| device.path == device_path) {
+                continue;
+            }
+            let Ok(path) = CString::new(device_path.as_str()) else {
                 continue;
             };
             let fd = unsafe {
@@ -218,15 +240,20 @@ impl NanoSystem {
                 )
             };
             if fd >= 0 {
+                let (abs_max_x, abs_max_y) = unsafe { (read_abs_max(fd, ABS_X), read_abs_max(fd, ABS_Y)) };
                 self.devices.push(Device {
+                    path: device_path,
                     file: unsafe { File::from_raw_fd(fd) },
+                    abs_max_x,
+                    abs_max_y,
                 });
             }
         }
-        if !self.devices.is_empty() {
+        if self.devices.len() != previous_device_count && !self.devices.is_empty() {
             Self::serial_log(&format!(
-                "desktop: evdev ready ({} device(s))\n",
-                self.devices.len()
+                "desktop: evdev ready ({} device(s): {})\n",
+                self.devices.len(),
+                self.devices.iter().map(|device| device.path.as_str()).collect::<Vec<_>>().join(", ")
             ));
         }
     }
@@ -245,6 +272,8 @@ impl NanoSystem {
                     value: 0,
                 };
                 let fd = std::os::unix::io::AsRawFd::as_raw_fd(&self.devices[index].file);
+                let abs_max_x = self.devices[index].abs_max_x;
+                let abs_max_y = self.devices[index].abs_max_y;
                 let n = unsafe {
                     libc::read(
                         fd,
@@ -255,12 +284,12 @@ impl NanoSystem {
                 if n != core::mem::size_of::<InputEvent>() as isize {
                     break;
                 }
-                self.handle_event(&event);
+                self.handle_event(&event, abs_max_x, abs_max_y);
             }
         }
     }
 
-    fn handle_event(&mut self, event: &InputEvent) {
+    fn handle_event(&mut self, event: &InputEvent, abs_max_x: u64, abs_max_y: u64) {
         match event.type_ {
             EV_KEY => self.handle_key(event.code, event.value),
             EV_REL => match event.code {
@@ -270,12 +299,23 @@ impl NanoSystem {
                 REL_HWHEEL => {}
                 _ => {}
             },
+            EV_ABS if abs_max_x != 0 && abs_max_y != 0 => {
+                match event.code {
+                    ABS_X => self.pending.absolute_x = Some(event.value.max(0) as u64),
+                    ABS_Y => self.pending.absolute_y = Some(event.value.max(0) as u64),
+                    _ => {}
+                }
+                self.pending.absolute_max_x = abs_max_x;
+                self.pending.absolute_max_y = abs_max_y;
+            }
             EV_SYN if event.code == 0 => {
                 let state = &mut self.input_state;
                 if self.pending.changed {
                     state.pointer_sequence = state.pointer_sequence.wrapping_add(1);
                 }
-                if self.pending.dx != 0
+                if self.pending.absolute_x.is_some()
+                    || self.pending.absolute_y.is_some()
+                    || self.pending.dx != 0
                     || self.pending.dy != 0
                     || self.pending.scroll != 0
                     || self.pending.changed
@@ -283,10 +323,21 @@ impl NanoSystem {
                     state.pointer_dx = self.pending.dx;
                     state.pointer_dy = self.pending.dy;
                     state.scroll = self.pending.scroll;
+                    let absolute = match (self.pending.absolute_x, self.pending.absolute_y) {
+                        (Some(x), Some(y)) => {
+                            state.pointer_x = x;
+                            state.pointer_y = y;
+                            state.pointer_max_x = self.pending.absolute_max_x;
+                            state.pointer_max_y = self.pending.absolute_max_y;
+                            state.pointer_is_absolute = true;
+                            Some((x, y, self.pending.absolute_max_x, self.pending.absolute_max_y))
+                        }
+                        _ => { state.pointer_is_absolute = false; None }
+                    };
                     self.queue.push(Queued::Pointer(NanoBasicPointerEvent {
                         dx: self.pending.dx,
                         dy: self.pending.dy,
-                        absolute: None,
+                        absolute,
                     }));
                     self.pending = PendingPointer::default();
                 }
@@ -446,6 +497,15 @@ impl NanoSystem {
     }
 
     pub fn set_shift_key(&mut self, _key: u8) {}
+}
+
+unsafe fn read_abs_max(fd: libc::c_int, axis: u16) -> u64 {
+    // Linux EVIOCGABS(axis): _IOR('E', 0x40 + axis, struct input_absinfo).
+    let request = (0x8018_4540u64 + axis as u64) as libc::c_int;
+    let mut info = InputAbsInfo::default();
+    if libc::ioctl(fd, request, &mut info) == 0 && info.maximum > info.minimum {
+        (info.maximum - info.minimum) as u64
+    } else { 0 }
 }
 
 fn is_modifier(code: u16) -> bool {

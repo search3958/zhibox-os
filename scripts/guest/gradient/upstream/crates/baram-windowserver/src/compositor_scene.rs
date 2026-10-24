@@ -123,7 +123,7 @@ pub fn render_scene(
             }
         }
 
-        let hud_text1 = "Baram OS (1.2)";
+        let hud_text1 = "Zhibox OS (1.2)";
         let mut hw1 = 0usize;
         for ch in hud_text1.chars() {
             if baram_font::ttf_font_hud::is_available() {

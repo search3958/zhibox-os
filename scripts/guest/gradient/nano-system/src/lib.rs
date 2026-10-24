@@ -251,7 +251,7 @@ impl NanoSystem {
         }
         if self.devices.len() != previous_device_count && !self.devices.is_empty() {
             Self::serial_log(&format!(
-                "desktop: evdev ready ({} device(s): {})\n",
+                "baram-ui: evdev ready ({} device(s): {})\n",
                 self.devices.len(),
                 self.devices.iter().map(|device| device.path.as_str()).collect::<Vec<_>>().join(", ")
             ));

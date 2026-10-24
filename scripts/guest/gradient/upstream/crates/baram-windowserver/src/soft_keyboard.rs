@@ -519,10 +519,10 @@ fn keyboard_mode_name(language: KeyboardLanguage) -> &'static str {
     match language {
         KeyboardLanguage::Latin => "English",
         KeyboardLanguage::Japanese => "日本語",
-        KeyboardLanguage::KoreanDubeolsik => "한국어 · 두벌식",
-        KeyboardLanguage::KoreanHancomRoman => "한국어 · 한컴 로마자",
-        KeyboardLanguage::KoreanChosunDubeolsik => "조선말 · 두벌식",
-        KeyboardLanguage::ChinesePinyin => "中文 · 拼音",
+        KeyboardLanguage::KoreanDubeolsik => "한국 두벌식",
+        KeyboardLanguage::KoreanHancomRoman => "한컴 로마자",
+        KeyboardLanguage::KoreanChosunDubeolsik => "조선 두벌식",
+        KeyboardLanguage::ChinesePinyin => "中文·拼音",
     }
 }
 

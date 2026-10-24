@@ -1,19 +1,19 @@
 #[cfg(feature = "uefi")]
 fn baram_kernel_main(mut nano: NanoSystem) -> Status {
-    NanoSystem::serial_log("baram: kernel entry\r\n");
+    NanoSystem::serial_log("baram-ui: kernel entry\r\n");
     let mut timer_event = nano.take_timer_event();
-    NanoSystem::serial_log("baram: acquiring screen\r\n");
+    NanoSystem::serial_log("baram-ui: acquiring screen\r\n");
     let mut screen = match Screen::take() {
         Ok(screen) => screen,
         Err(_) => {
-            NanoSystem::serial_log("baram: screen acquisition failed\r\n");
+            NanoSystem::serial_log("baram-ui: screen acquisition failed\r\n");
             NanoSystem::paint_failure_screen();
             return Status::UNSUPPORTED;
         }
     };
 
     NanoSystem::serial_log(&alloc::format!(
-        "baram: screen ready {}x{} stride={}\r\n",
+        "baram-ui: screen ready {}x{} stride={}\r\n",
         screen.width(),
         screen.height(),
         screen.info().stride
@@ -21,34 +21,34 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
     unsafe { baram_font::log::init_screen(&screen) };
     log_line_str("BaramOS kernel: starting...");
 
-    NanoSystem::serial_log("baram: panic reporter ready\r\n");
+    NanoSystem::serial_log("baram-ui: panic reporter ready\r\n");
     unsafe { baram_kern::panic::init_from_screen(&screen) };
 
     // Nano System has already cleared the framebuffer before input probing;
     // replace that minimal handoff screen with the kernel boot logo now.
     draw_boot_logo(&mut screen);
-    NanoSystem::serial_log("baram: boot logo drawn\r\n");
+    NanoSystem::serial_log("baram-ui: boot logo drawn\r\n");
 
     let compute_workers = baram_core::parallel::init();
-    NanoSystem::serial_log("baram: compute dispatcher ready\r\n");
+    NanoSystem::serial_log("baram-ui: compute dispatcher ready\r\n");
     log_line_str(&alloc::format!(
         "BaramOS: {} compute APs enabled",
         compute_workers
     ));
 
     config::init_config();
-    NanoSystem::serial_log("baram: config ready\r\n");
+    NanoSystem::serial_log("baram-ui: config ready\r\n");
     let mut mouse_motion = baram_iokit::mouse::MouseMotionProcessor::new();
     log_line_str("BaramOS: config loaded");
 
-    NanoSystem::serial_log("baram: initializing fonts\r\n");
+    NanoSystem::serial_log("baram-ui: initializing fonts\r\n");
     baram_font::ttf_font::init();
-    NanoSystem::serial_log("baram: primary font ready\r\n");
+    NanoSystem::serial_log("baram-ui: primary font ready\r\n");
     baram_font::ttf_font_hud::init();
-    NanoSystem::serial_log("baram: HUD font ready\r\n");
+    NanoSystem::serial_log("baram-ui: HUD font ready\r\n");
     log_line_str("BaramOS: fonts initialized");
 
-    NanoSystem::serial_log("baram: prerendering cursors\r\n");
+    NanoSystem::serial_log("baram-ui: prerendering cursors\r\n");
     unsafe {
         baram_windowserver::cursor::CURSOR_NORMAL = Some(cursor::prerender_cursor(
             cursor::CURSOR_SVG,
@@ -63,24 +63,24 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
             8,
         ));
     }
-    NanoSystem::serial_log("baram: cursors ready\r\n");
+    NanoSystem::serial_log("baram-ui: cursors ready\r\n");
 
     log_line_str("BaramOS: input is owned by Nano System");
     nano.set_shift_key(shift_key::load_shift_key());
 
     let mut cursor_x: i32 = (screen.width() / 2) as i32;
     let mut cursor_y: i32 = (screen.height() / 2) as i32;
-    NanoSystem::serial_log("baram: loading display state\r\n");
+    NanoSystem::serial_log("baram-ui: loading display state\r\n");
     let mut display_state = baram_bsd::uri::DisplayState::new();
     baram_bsd::uri::load_settings_from_config(&mut display_state);
-    NanoSystem::serial_log("baram: display state loaded\r\n");
+    NanoSystem::serial_log("baram-ui: display state loaded\r\n");
 
     if !baram_bsd::setup::is_setup_done() {
         log_line_str("BaramOS: first boot detected, starting setup wizard");
         let mut wizard = baram_bsd::setup::SetupWizard::new();
         let setup_w = screen.width();
         let setup_h = screen.height();
-        NanoSystem::serial_log(&alloc::format!("baram: setup {}x{}\r\n", setup_w, setup_h));
+        NanoSystem::serial_log(&alloc::format!("baram-ui: setup {}x{}\r\n", setup_w, setup_h));
         let mut setup_engine = baram_windowserver::warp::WarpEngine::new_warp4("setup.w4a");
         setup_engine.set_chrome_visible(false);
         let mut setup_scene = LayerSystem::new(setup_w, setup_h);
@@ -88,14 +88,14 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
         let mut setup_surface = LayerSystem::new(528, 320);
         let setup_origin = ((setup_w as i32 - 528) / 2, (setup_h as i32 - 320) / 2);
         let setup_card = (setup_origin.0, setup_origin.1, 528usize, 320usize);
-        NanoSystem::serial_log("baram: decoding setup wallpaper\r\n");
+        NanoSystem::serial_log("baram-ui: decoding setup wallpaper\r\n");
         let setup_wallpaper = wallpaper_for_state(&display_state, setup_w, setup_h);
-        NanoSystem::serial_log("baram: setup wallpaper decoded\r\n");
+        NanoSystem::serial_log("baram-ui: setup wallpaper decoded\r\n");
         let setup_background = setup_wallpaper.as_ref().map(|wallpaper| {
             if !baram_core::screen::gpu_enabled() {
                 return wallpaper.clone();
             }
-            NanoSystem::serial_log("baram: blurring setup wallpaper\r\n");
+            NanoSystem::serial_log("baram-ui: blurring setup wallpaper\r\n");
             let mut blurred = alloc::vec![0u32; setup_w * setup_h];
             let mut scratch = alloc::vec![0u32; setup_w * setup_h];
             baram_graphics::blur::blur_region_to_with_scratch(
@@ -109,11 +109,11 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
             );
             blurred
         });
-        NanoSystem::serial_log("baram: setup background ready\r\n");
+        NanoSystem::serial_log("baram-ui: setup background ready\r\n");
         let card_radius = config::get_usize("ui-theme/card/radius", 12);
         let setup_shadow =
             baram_windowserver::window::RoundedShadow::new(setup_card.2, setup_card.3, card_radius);
-        NanoSystem::serial_log("baram: setup shadow ready\r\n");
+        NanoSystem::serial_log("baram-ui: setup shadow ready\r\n");
         let mut setup_scene_dirty = true;
         let mut setup_card_dirty = true;
         let mut setup_first_frame_logged = false;
@@ -128,7 +128,7 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
         let mut setup_next_present_ms = 0u64;
         setup_engine.set_screen(wizard.warp3_screen());
         setup_engine.update(528, 320);
-        NanoSystem::serial_log("baram: setup layout ready\r\n");
+        NanoSystem::serial_log("baram-ui: setup layout ready\r\n");
 
         loop {
             if let Some(ref mut timer) = timer_event {
@@ -302,7 +302,7 @@ fn baram_kernel_main(mut nano: NanoSystem) -> Status {
             if setup_scene_dirty {
                 setup_present.flush(&mut screen);
                 if !setup_first_frame_logged {
-                    NanoSystem::serial_log("baram: setup first frame ready\r\n");
+                    NanoSystem::serial_log("baram-ui: setup first frame ready\r\n");
                     setup_first_frame_logged = true;
                 }
             } else if setup_card_dirty {

@@ -205,7 +205,7 @@ stop_warp4() {
 # SVG cursor are all inside the single /bin/desktop binary.
 start_desktop() {
 	[ -x /bin/desktop ] || {
-		echo "desktop: /bin/desktop not present"
+		echo "baram-ui: /bin/desktop not present"
 		return 1
 	}
 
@@ -224,7 +224,7 @@ start_desktop() {
 	# log level before the compositor takes over; real errors still show.
 	echo 3 > /proc/sys/kernel/printk 2>/dev/null
 
-	echo "desktop: starting BaramOS GUI (native compositor)"
+	echo "baram-ui: starting BaramOS GUI (native compositor)"
 	BARAM_ROOT=/usr/share/zhibox /bin/desktop &
 	DESKTOP_PID=$!
 
@@ -233,7 +233,7 @@ start_desktop() {
 	# framebuffer desktop.
 	wait "$DESKTOP_PID" 2>/dev/null
 	DESKTOP_PID=""
-	echo "desktop: exited"
+	echo "baram-ui: exited"
 }
 
 # GUI: gradient を先に起動し、最初のフレームが出たことを /tmp/gradient.ready

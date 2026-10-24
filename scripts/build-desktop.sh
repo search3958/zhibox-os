@@ -20,12 +20,12 @@ say() {
 }
 
 if [ ! -d "$GUI_SRC/crates/baram-windowserver" ]; then
-	echo "desktop: vendored GUI sources not found at $GUI_SRC" >&2
+	echo "baram-ui: vendored GUI sources not found at $GUI_SRC" >&2
 	exit 1
 fi
 
 if ! rustup target list --installed | grep -qx "$TARGET"; then
-	echo "desktop: installing Rust target $TARGET" >&2
+	echo "baram-ui: installing Rust target $TARGET" >&2
 	rustup target add "$TARGET"
 fi
 
@@ -134,7 +134,7 @@ new = """        #[cfg(feature = "uefi")]
 if old in text:
     script.write_text(text.replace(old, new))
 elif "let utc_seconds = utc_hour" not in text:
-    raise SystemExit("desktop: could not patch Warp 4 clock")
+    raise SystemExit("baram-ui: could not patch Warp 4 clock")
 
 # --------------------------------------------------------- settings GPU tab
 # The upstream settings app already owns the theme/pointer/HUD/system tabs.
@@ -375,7 +375,7 @@ static LINUX_GPU_ENABLED: AtomicBool = AtomicBool::new(true);
 pub fn set_gpu_enabled(enabled: bool) {
     LINUX_GPU_ENABLED.store(enabled, Ordering::Relaxed);
     eprintln!(
-        "desktop: gpu presentation {}",
+        "baram-ui: gpu presentation {}",
         if enabled { "on (DRM dirty rectangles)" } else { "off (CPU full-frame)" }
     );
 }
@@ -405,7 +405,7 @@ impl Screen {
     pub fn take() -> Result<Screen, ()> {
         let fd = unsafe { libc::open(b"/dev/fb0\0".as_ptr() as *const libc::c_char, libc::O_RDWR) };
         if fd < 0 {
-            eprintln!("desktop: open /dev/fb0 failed");
+            eprintln!("baram-ui: open /dev/fb0 failed");
             return Err(());
         }
         let mut var = FbVarScreeninfo::default();
@@ -413,13 +413,13 @@ impl Screen {
         if unsafe { libc::ioctl(fd, FBIOGET_VSCREENINFO, &mut var) } < 0
             || unsafe { libc::ioctl(fd, FBIOGET_FSCREENINFO, &mut fix) } < 0
         {
-            eprintln!("desktop: framebuffer ioctl failed");
+            eprintln!("baram-ui: framebuffer ioctl failed");
             unsafe { libc::close(fd) };
             return Err(());
         }
         if var.bits_per_pixel != 32 {
             eprintln!(
-                "desktop: unsupported framebuffer depth {} bpp",
+                "baram-ui: unsupported framebuffer depth {} bpp",
                 var.bits_per_pixel
             );
             unsafe { libc::close(fd) };
@@ -448,7 +448,7 @@ impl Screen {
             )
         };
         if mapping == libc::MAP_FAILED {
-            eprintln!("desktop: mmap /dev/fb0 failed");
+            eprintln!("baram-ui: mmap /dev/fb0 failed");
             unsafe { libc::close(fd) };
             return Err(());
         }
@@ -459,7 +459,7 @@ impl Screen {
         };
         let (drm_fd, drm_fb_id) = Self::open_drm();
         eprintln!(
-            "desktop: framebuffer {}x{} stride={} {}bpp fix_line={} smem={} drm_fd={} fb={}",
+            "baram-ui: framebuffer {}x{} stride={} {}bpp fix_line={} smem={} drm_fd={} fb={}",
             width,
             height,
             stride,
@@ -570,7 +570,7 @@ impl Screen {
             clips_ptr: &clip as *const DrmClipRect as u64,
         };
         if unsafe { libc::ioctl(self.drm_fd, DRM_IOCTL_MODE_DIRTYFB, &mut cmd) } < 0 {
-            eprintln!("desktop: DRM DIRTYFB failed; display may not refresh");
+            eprintln!("baram-ui: DRM DIRTYFB failed; display may not refresh");
         }
     }
 
@@ -702,7 +702,7 @@ replacement = """        // URI command inbox.  Other guest processes (and the i
 if needle in ri_text:
     runtime_input.write_text(ri_text.replace(needle, replacement, 1))
 else:
-    raise SystemExit("desktop: could not patch URI inbox")
+    raise SystemExit("baram-ui: could not patch URI inbox")
 
 # GPU ON uses DRM dirty rectangles. GPU OFF keeps the wallpaper, skips backdrop
 # blur in the vendored compositor, and asks the CPU-rendered framebuffer to
@@ -737,7 +737,7 @@ for source, pattern in (
         return m.group(1) + i + tpl.replace("{i}", i) + m.group(0)[1:]
     new_text, n = pattern.subn(insert, text, count=1)
     if n != 1:
-        raise SystemExit("desktop: could not insert GPU refresh branch in " + source)
+        raise SystemExit("baram-ui: could not insert GPU refresh branch in " + source)
     path.write_text(new_text)
 
 PY
@@ -771,17 +771,17 @@ for path in sorted(src.iterdir()):
     if path.is_dir():
         if path.name == "icon":
             shutil.copytree(path, target)
-            print(f"desktop: copied icon set")
+            print(f"baram-ui: copied icon set")
             continue
         with tarfile.open(target, "w", format=tarfile.USTAR_FORMAT) as tar:
             for member in sorted(path.rglob("*")):
                 if member.is_file():
                     tar.add(member, arcname=str(member.relative_to(path)))
-        print(f"desktop: packaged {target.name} ({target.stat().st_size} bytes)")
+        print(f"baram-ui: packaged {target.name} ({target.stat().st_size} bytes)")
     elif path.is_file():
         shutil.copy2(path, target)
 
-print(f"desktop: assets in {dest}")
+print(f"baram-ui: assets in {dest}")
 PY
 
 say "binary: $DIST/zhibox-desktop"

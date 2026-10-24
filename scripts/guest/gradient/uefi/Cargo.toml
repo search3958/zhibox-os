@@ -1,0 +1,13 @@
+[package]
+name = "uefi"
+version = "0.38.0"
+edition = "2021"
+
+[features]
+default = []
+alloc = []
+logger = []
+global_allocator = []
+
+[dependencies]
+libc = "0.2"

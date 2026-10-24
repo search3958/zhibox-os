@@ -1,0 +1,8 @@
+[package]
+name = "baram-iokit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+baram-core = { path = "../baram-core", default-features = false, features = ["linux"] }
+baram-bsd = { path = "../baram-bsd" }

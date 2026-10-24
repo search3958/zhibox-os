@@ -1,0 +1,28 @@
+[package]
+name = "zhibox-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "BaramOS desktop runtime for the zhibox-os Linux guest"
+
+[[bin]]
+name = "zhibox-desktop"
+path = "src/main.rs"
+
+[features]
+default = ["uefi"]
+uefi = []
+
+[dependencies]
+baram-core = { path = "../baram-core", default-features = false, features = ["linux"] }
+baram-font = { path = "../baram-font", default-features = false, features = ["ttf"] }
+baram-graphics = { path = "../baram-graphics", default-features = false, features = ["ttf"] }
+baram-bsd = { path = "../baram-bsd" }
+baram-windowserver = { path = "../baram-windowserver" }
+baram-warp4 = { path = "../baram-warp4", default-features = false, features = ["ttf"] }
+baram-iokit = { path = "../baram-iokit" }
+nano-system = { path = "../nano-system" }
+uefi = { workspace = true }
+png-decoder = { path = "../png-decoder", default-features = false }
+wana_kana = { path = "../wana-kana" }
+libc = "0.2"
+libm = "0.2"

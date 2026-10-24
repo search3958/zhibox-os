@@ -1,0 +1,9 @@
+include!("window_header.rs");
+include!("window_methods.rs");
+include!("window_dialog.rs");
+include!("window_manager_struct.rs");
+include!("window_manager_core.rs");
+include!("window_manager_input.rs");
+include!("window_manager_draw.rs");
+include!("window_manager_state.rs");
+include!("window_render.rs");

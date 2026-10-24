@@ -36,6 +36,20 @@ if [ -x "$REPO_ROOT/scripts/build-warp4.sh" ]; then
   fi
 fi
 
+# Full BaramOS desktop (static x86_64 musl).  This is the primary GUI owner:
+# it contains the compositor, window manager, IME, launcher, Warp 3/4 engines,
+# SVG cursor and settings application.  Warp4 above remains a fallback runner.
+if [ -x "$REPO_ROOT/scripts/build-desktop.sh" ]; then
+  if "$REPO_ROOT/scripts/build-desktop.sh"; then
+    install -m 0755 "$OUT/desktop/zhibox-desktop" "$INITRAMFS/bin/desktop"
+    mkdir -p "$INITRAMFS/usr/share/zhibox/apps"
+    cp -R "$OUT/desktop/apps/." "$INITRAMFS/usr/share/zhibox/apps/"
+    cp "$OUT/desktop/config.xml" "$INITRAMFS/usr/share/zhibox/config.xml"
+  else
+    say "デスクトップのビルドに失敗しました (gradient にフォールバック)"
+  fi
+fi
+
 # HTML+CSS はゲスト Linux の WebKitGTK が起動時に描画する (scripts/guest/web/)。
 # initramfs には HTML も raw も同梱しない。rootfs.img が無い場合や描画に失敗した
 # 場合は、fb-gradient がプレースホルダーを表示する。
@@ -100,4 +114,7 @@ fi
 cp "$REPO_ROOT/scripts/guest/init" "$INITRAMFS/init"
 chmod 0755 "$INITRAMFS/init"
 ( cd "$INITRAMFS" && find . | cpio -o -H newc --quiet | gzip -9 ) > "$INITRD"
-ls -lh "$INITRD"
+# boot-qemu.sh の既定パス ($OUT/initramfs.cpio.gz) も常に最新にしておく。
+# build-and-boot.sh 経由でなくても、直接の GUI ビルド後にも最新が乗るようにする。
+cp -f "$INITRD" "$OUT/initramfs.cpio.gz"
+ls -lh "$INITRD" "$OUT/initramfs.cpio.gz"

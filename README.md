@@ -253,12 +253,12 @@ rootfs.img (Debian/Ubuntu + WebKitGTK + Xvfb)  -- IDE /dev/sda
 
 ### Warp 4 ウィンドウ (ネイティブ XML / スクリプト実行)
 
-`WARP4` ウィンドウは、HTML に変換せず **baram-os のネイティブ Warp 4 エンジン**で
+`WARP4` ウィンドウは、HTML に変換せず **同梱したネイティブ Warp 4 エンジン**で
 `.w4a` アプリを実行します。`.w4a` は `main.w4u` (XML レイアウト)、`main.w4s`
 (スクリプト)、`config.ini` を格納した TAR アーカイブです。
 
 ```
-baram-os/crates/baram-warp4  --(scripts/build-warp4.sh)-->  output/warp4/zhibox-warp4
+scripts/guest/gradient/upstream/crates/baram-warp4 --(scripts/build-warp4.sh)--> output/warp4/zhibox-warp4
                                                            output/warp4/apps/*.w4a
         |
         +-- ゲスト init: BARAM_ROOT=/usr/share/zhibox /bin/warp4 calc.w4a
@@ -270,18 +270,18 @@ baram-os/crates/baram-warp4  --(scripts/build-warp4.sh)-->  output/warp4/zhibox-
               +-- マウス座標と左ボタン状態を /tmp/warp4.input へ転送
 ```
 
-- **ビルド依存**: 参照実装の `../baram-os` が必要です。別の場所に置いた場合は
-  `BARAM_OS=/path/to/baram-os sh scripts/build-warp4.sh` を実行してください。
+- **ビルド依存**: GUI ソースとアプリは `scripts/guest/gradient/upstream/` に同梱しています。
+  ビルド時に別リポジトリを参照しません。
   Rust の `x86_64-unknown-linux-musl` ターゲットが無ければ自動で追加します
 - **成果物**: `output/warp4/zhibox-warp4` (静的 musl、約 11MB) と
   `output/warp4/apps/calc.w4a`。`build-initramfs.sh` が `bin/warp4` と
   `/usr/share/zhibox/apps/` に同梱します
-- **Linux 互換 shim**: `scripts/guest/warp4/baram-bsd/` が、baram-os の
+- **Linux 互換 shim**: `scripts/guest/gradient/warp4/baram-bsd/` が、同梱 GUI の
   UEFI 前提 `baram-bsd` を Linux の通常ファイル I/O に置き換えます。
   `config.xml` もこの shim に同梱されます
 - **起動順**: `gradient` の準備完了後に Warp 4 → WebKit の順で起動します。
   Warp 4 は rootfs.img が無くても動作し、WebKit だけがプレースホルダーになります
-- **アプリの追加**: `baram-os/files/app/<name>.w4a` を用意し、
+- **アプリの追加**: `scripts/guest/gradient/upstream/files/app/<name>.w4a` を用意し、
   `WARP4_APPS="calc.w4a <name>.w4a" sh scripts/build-warp4.sh` で同梱できます。
   起動アプリを変える場合は `scripts/guest/init` の `/bin/warp4 calc.w4a` を
   書き換えてください
@@ -438,7 +438,7 @@ Windows の NTFS も macOS の APFS（既定）も非区別のため **`kernel/`
 | `scripts/build-and-boot.sh` | ビルド → initramfs → QEMU ブート確認 → 成果物書き出し |
 | `scripts/build-rootfs.sh` | ゲスト Linux 用 rootfs.img (WebKitGTK + Xvfb) を生成。macOS は QEMU ゲスト内 apt に分岐 |
 | `scripts/build-rootfs-guest.sh` | macOS 専用: Ubuntu base + QEMU ゲストで rootfs.img を生成 |
-| `scripts/build-warp4.sh` | baram-os の Warp 4 エンジンから静的 Linux ランナーと `.w4a` アプリを生成 |
+| `scripts/build-warp4.sh` | 同梱 Warp 4 エンジンから静的 Linux ランナーと `.w4a` アプリを生成 |
 | `scripts/build-initramfs.sh` | busybox + gradient + Warp 4 ランナーの initramfs を生成 (HTML raw は同梱しない) |
 | `scripts/boot-qemu.sh` | QEMU 起動。rootfs.img があれば IDE 接続してゲスト描画を有効化 |
 | `scripts/boot-gui.sh` | **画面付き (GUI)** で起動（WSL は WSLg / macOS はネイティブ） |

@@ -145,14 +145,16 @@ INITRAMFS_INPUTS=(
   "$REPO_ROOT/scripts/guest/wallpaper.png"
   "$REPO_ROOT/scripts/host/darwin/linux-shim"
   "$REPO_ROOT/scripts/build-warp4.sh"
+  "$REPO_ROOT/scripts/build-desktop.sh"
   "$REPO_ROOT/scripts/guest/warp4"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-warp4"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-core"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-font"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/baram-graphics"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/crates/stb_truetype_rust"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/files/data/fonts"
-  "${BARAM_OS:-$REPO_ROOT/../baram-os}/files/data/ui/check-icon.svg"
+  "$REPO_ROOT/scripts/guest/desktop"
+  "$REPO_ROOT/scripts/guest/gradient/upstream/crates"
+  "$REPO_ROOT/scripts/guest/gradient/upstream/files"
+  "$REPO_ROOT/scripts/guest/gradient/baram-bsd"
+  "$REPO_ROOT/scripts/guest/gradient/baram-iokit"
+  "$REPO_ROOT/scripts/guest/gradient/nano-system"
+  "$REPO_ROOT/scripts/guest/gradient/uefi"
+  "$REPO_ROOT/scripts/guest/gradient/runner"
 )
 
 # ------------------------------------------------------------------ rootfs

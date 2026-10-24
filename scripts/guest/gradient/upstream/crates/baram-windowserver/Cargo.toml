@@ -1,0 +1,14 @@
+[package]
+name = "baram-windowserver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+baram-core = { path = "../baram-core" }
+baram-font = { path = "../baram-font" }
+baram-graphics = { path = "../baram-graphics" }
+baram-bsd = { path = "../baram-bsd" }
+baram-warp4 = { path = "../baram-warp4", default-features = false, features = ["ttf"] }
+uefi = { workspace = true }
+libm = { workspace = true }
+png-decoder = { path = "../png-decoder" }

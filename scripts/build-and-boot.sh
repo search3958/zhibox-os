@@ -90,6 +90,9 @@ bash scripts/config --enable DRM_BOCHS
 # GEM バッファ + DIRTYFB でホスト側に転送する (gradient が自動で使う)
 bash scripts/config --enable VIRTIO --enable VIRTIO_PCI \
                     --enable DRM_VIRTIO_GPU
+# 仮想メモリ (swap) は OS 全体で使わない: ストレージへの負荷をかけないため
+# カーネル機能自体を無効化する (swapon/mkswap は compile-out される)
+bash scripts/config --disable SWAP
 
 if [ "$OS" = macos ]; then
   # objtool (スタック検証 / ORC unwinder) は macOS ホストではビルド不能 (libelf 等に依存)。

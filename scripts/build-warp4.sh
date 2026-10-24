@@ -1,14 +1,14 @@
 #!/bin/sh
 # Build the native Warp 4 runner for the zhibox-os guest.
 #
-# The Warp 4 engine lives in the sibling baram-os tree.  This script
+# The Warp 4 engine lives in the vendored GUI source tree.  This script
 # assembles a temporary Cargo workspace from those crates, swaps in the small
 # Linux `baram-bsd` shim, applies the two Linux-only patches to baram-core,
 # and cross-compiles a static x86_64 musl binary.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-BARAM_OS=${BARAM_OS:-"$ROOT/../baram-os"}
+GUI_SRC="$ROOT/scripts/guest/gradient/upstream"
 OUT=${OUT:-"$ROOT/output"}
 BUILD="$OUT/build/warp4-src"
 DIST="$OUT/warp4"
@@ -19,9 +19,8 @@ say() {
 	printf 'warp4: %s\n' "$*"
 }
 
-if [ ! -d "$BARAM_OS/crates/baram-warp4" ]; then
-	echo "warp4: baram-os not found at $BARAM_OS" >&2
-	echo "warp4: set BARAM_OS=/path/to/baram-os" >&2
+if [ ! -d "$GUI_SRC/crates/baram-warp4" ]; then
+	echo "warp4: vendored GUI sources not found at $GUI_SRC" >&2
 	exit 1
 fi
 
@@ -36,15 +35,15 @@ mkdir -p "$BUILD/crates" "$BUILD/files/data/fonts" "$BUILD/files/data/ui" \
 	"$BUILD/apps" "$DIST/apps"
 
 for crate in baram-warp4 baram-core baram-font baram-graphics stb_truetype_rust; do
-	cp -R "$BARAM_OS/crates/$crate" "$BUILD/crates/"
+	cp -R "$GUI_SRC/crates/$crate" "$BUILD/crates/"
 done
-cp -R "$ROOT/scripts/guest/warp4/baram-bsd" "$BUILD/crates/"
-cp -R "$ROOT/scripts/guest/warp4/runner" "$BUILD/"
+cp -R "$ROOT/scripts/guest/gradient/warp4/baram-bsd" "$BUILD/crates/"
+cp -R "$ROOT/scripts/guest/gradient/warp4/runner" "$BUILD/"
 
-cp "$BARAM_OS/files/data/fonts/HarmonyOS_Sans_SC_Regular.ttf" "$BUILD/files/data/fonts/"
-cp "$BARAM_OS/files/data/fonts/GothicA1-Medium.ttf" "$BUILD/files/data/fonts/"
-cp "$BARAM_OS/files/data/fonts/GoogleSansFlex_24pt-Medium.ttf" "$BUILD/files/data/fonts/"
-cp "$BARAM_OS/files/data/ui/check-icon.svg" "$BUILD/files/data/ui/"
+cp "$GUI_SRC/files/data/fonts/HarmonyOS_Sans_SC_Regular.ttf" "$BUILD/files/data/fonts/"
+cp "$GUI_SRC/files/data/fonts/GothicA1-Medium.ttf" "$BUILD/files/data/fonts/"
+cp "$GUI_SRC/files/data/fonts/GoogleSansFlex_24pt-Medium.ttf" "$BUILD/files/data/fonts/"
+cp "$GUI_SRC/files/data/ui/check-icon.svg" "$BUILD/files/data/ui/"
 
 cat >"$BUILD/Cargo.toml" <<'EOF'
 [workspace]
@@ -236,7 +235,7 @@ mkdir -p "$DIST"
 cp "$BUILD/target/$TARGET/release/zhibox-warp4" "$DIST/zhibox-warp4"
 chmod 755 "$DIST/zhibox-warp4"
 
-python3 - "$BARAM_OS" "$DIST/apps" $APPS <<'PY'
+python3 - "$GUI_SRC" "$DIST/apps" $APPS <<'PY'
 from pathlib import Path
 import shutil
 import sys

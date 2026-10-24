@@ -1,0 +1,11 @@
+[package]
+name = "baram-bsd"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+linux = []
+
+[dependencies]
+baram-core = { path = "../baram-core", default-features = false, features = ["linux"] }

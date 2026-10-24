@@ -1,0 +1,13 @@
+[package]
+name = "nano-system"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+uefi = []
+esp32s3 = []
+
+[dependencies]
+libc = "0.2"
+uefi = { workspace = true }

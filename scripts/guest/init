@@ -14,6 +14,7 @@ GUEST_ROOT=/mnt/root
 GUEST_PID=""
 GRADIENT_PID=""
 WARP4_PID=""
+DESKTOP_PID=""
 GUEST_MOUNTED=0
 
 guest_mount() {
@@ -154,6 +155,7 @@ start_warp4() {
 	}
 
 	rm -f /tmp/warp4.raw /tmp/warp4.version /tmp/warp4.input /tmp/warp4.stop
+	echo 3 > /proc/sys/kernel/printk 2>/dev/null
 	echo "warp4: starting native app (calc.w4a)"
 	BARAM_ROOT=/usr/share/zhibox /bin/warp4 calc.w4a &
 	WARP4_PID=$!
@@ -195,6 +197,43 @@ stop_warp4() {
 	fi
 
 	rm -f /tmp/warp4.stop /tmp/warp4.input
+}
+
+
+# GUI: full BaramOS desktop.  This owns /dev/fb0 and evdev directly; the
+# compositor, window manager, IME, launcher, taskbar, Warp 3/4 engines and
+# SVG cursor are all inside the single /bin/desktop binary.
+start_desktop() {
+	[ -x /bin/desktop ] || {
+		echo "desktop: /bin/desktop not present"
+		return 1
+	}
+
+	# Optional one-shot URI supplied by the QEMU command line, e.g.
+	#   zh_uri=os://display/gpu?enabled=0
+	zh_uri=""
+	for arg in $(cat /proc/cmdline 2>/dev/null); do
+		case "$arg" in
+			zh_uri=*) zh_uri="${arg#zh_uri=}" ;;
+		esac
+	done
+	[ -n "$zh_uri" ] && printf '%s\n' "$zh_uri" > /tmp/zhibox.uri
+
+	# The framebuffer console keeps printing kernel messages on top of the
+	# desktop (e.g. the slow TCG "random: crng init done").  Drop the console
+	# log level before the compositor takes over; real errors still show.
+	echo 3 > /proc/sys/kernel/printk 2>/dev/null
+
+	echo "desktop: starting BaramOS GUI (native compositor)"
+	BARAM_ROOT=/usr/share/zhibox /bin/desktop &
+	DESKTOP_PID=$!
+
+	# The binary logs to the serial console.  Keep the shell waiting here so
+	# the guest does not fall through to an interactive prompt underneath the
+	# framebuffer desktop.
+	wait "$DESKTOP_PID" 2>/dev/null
+	DESKTOP_PID=""
+	echo "desktop: exited"
 }
 
 # GUI: gradient を先に起動し、最初のフレームが出たことを /tmp/gradient.ready
@@ -248,8 +287,10 @@ if grep -q boottest /proc/cmdline 2>/dev/null; then
   halt -f
 fi
 
-if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
-	echo "(framebuffer demo: drag a title bar with the mouse, q to quit)"
+if grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/desktop ]; then
+	start_desktop || true
+elif grep -q zh_gui /proc/cmdline 2>/dev/null && [ -x /bin/gradient ]; then
+	echo "(fallback framebuffer demo: drag a title bar with the mouse, q to quit)"
 	start_gradient_and_html
 elif grep -q zh_html_root /proc/cmdline 2>/dev/null; then
 	render_guest_html || true

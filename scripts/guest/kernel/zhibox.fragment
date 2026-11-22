@@ -1,0 +1,10 @@
+# CONFIG_BT is not set
+# CONFIG_MEDIA_SUPPORT is not set
+# CONFIG_STAGING is not set
+# CONFIG_USB_GADGET is not set
+# CONFIG_NFS_FS is not set
+# CONFIG_CIFS is not set
+# CONFIG_SOUND_OSS_CORE is not set
+# CONFIG_DEBUG_INFO is not set
+# CONFIG_MODULE_SIG is not set
+# CONFIG_SYSTEM_TRUSTED_KEYS is not set

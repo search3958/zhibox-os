@@ -55,7 +55,6 @@ source "sound/core/Kconfig"
 
 source "sound/drivers/Kconfig"
 
-source "sound/isa/Kconfig"
 
 source "sound/pci/Kconfig"
 
@@ -91,7 +90,6 @@ source "sound/sparc/Kconfig"
 
 source "sound/parisc/Kconfig"
 
-source "sound/soc/Kconfig"
 
 source "sound/x86/Kconfig"
 

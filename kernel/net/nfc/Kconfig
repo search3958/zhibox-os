@@ -32,4 +32,3 @@ config NFC_DIGITAL
 source "net/nfc/nci/Kconfig"
 source "net/nfc/hci/Kconfig"
 
-source "drivers/nfc/Kconfig"

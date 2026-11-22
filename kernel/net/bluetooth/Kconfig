@@ -141,4 +141,3 @@ config BT_FEATURE_DEBUG
 	  This provides an option to enable/disable debugging statements
 	  at runtime via the experimental features interface.
 
-source "drivers/bluetooth/Kconfig"

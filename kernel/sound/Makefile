@@ -4,7 +4,7 @@
 
 obj-$(CONFIG_SOUND) += soundcore.o
 obj-$(CONFIG_DMASOUND) += oss/dmasound/
-obj-$(CONFIG_SND) += core/ i2c/ drivers/ isa/ pci/ ppc/ arm/ sh/ synth/ usb/ \
+obj-$(CONFIG_SND) += core/ i2c/ drivers/ pci/ ppc/ arm/ sh/ synth/ usb/ \
 	firewire/ sparc/ spi/ parisc/ pcmcia/ mips/ soc/ atmel/ hda/ x86/ xen/
 obj-$(CONFIG_SND_AOA) += aoa/
 
